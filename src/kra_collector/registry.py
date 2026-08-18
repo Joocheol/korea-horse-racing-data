@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -9,40 +11,54 @@ class EndpointSpec:
     service: str
     operation: str
     collection_grain: str
-    pools: tuple[str | None, ...] = (None,)
+    response_format: str
+    success_codes: tuple[str, ...]
+    required_params: tuple[str, ...]
+    optional_params: tuple[str, ...]
+    response_root: str
+    pagination: str
+    pool_param: str
+    pools: tuple[str | None, ...]
 
     @property
     def path(self) -> str:
         return f"{self.service}/{self.operation}"
 
 
+def _load_registry() -> dict[str, EndpointSpec]:
+    # JSON is valid YAML 1.2, so this remains a YAML-named frozen config while
+    # keeping the runtime dependency-free and parser behavior deterministic.
+    path = Path(__file__).resolve().parents[2] / "config" / "endpoints.yml"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "1":
+        raise RuntimeError("unsupported endpoint registry schema")
+    specs: dict[str, EndpointSpec] = {}
+    for endpoint_id, item in payload["endpoints"].items():
+        spec = EndpointSpec(
+            endpoint_id=endpoint_id,
+            service=item["service"],
+            operation=item["operation"],
+            collection_grain=item["collection_grain"],
+            response_format=item["response_format"],
+            success_codes=tuple(item["success_codes"]),
+            required_params=tuple(item["required_params"]),
+            optional_params=tuple(item["optional_params"]),
+            response_root=item["response_root"],
+            pagination=item["pagination"],
+            pool_param=item["pool_param"],
+            pools=tuple(item["market_codes"]),
+        )
+        if spec.response_format != "json" or spec.pool_param not in {
+            "required",
+            "optional",
+            "prohibited",
+        }:
+            raise RuntimeError(f"invalid endpoint registry entry: {endpoint_id}")
+        specs[endpoint_id] = spec
+    return specs
+
+
 # docs/API_FINDINGS.md is the evidence of record. API29 is intentionally called
 # without pool because the verified response multiplexes EXA/QNL/QPL. API30 is
 # called once per TLA/TRI pool.
-ENDPOINTS: dict[str, EndpointSpec] = {
-    "api28": EndpointSpec(
-        endpoint_id="api28",
-        service="API28_1",
-        operation="singlePredictionRateInfo_1",
-        collection_grain="month",
-    ),
-    "api29": EndpointSpec(
-        endpoint_id="api29",
-        service="API29_1",
-        operation="doublePredictionRateInfo_1",
-        collection_grain="month",
-    ),
-    "api30": EndpointSpec(
-        endpoint_id="api30",
-        service="API30_1",
-        operation="triplePredictionRateInfo_1",
-        collection_grain="month",
-        pools=("TLA", "TRI"),
-    ),
-    "api179": EndpointSpec(
-        endpoint_id="api179",
-        service="API179_1",
-        operation="salesAndDividendRate_1",
-        collection_grain="month",
-    ),
-}
+ENDPOINTS = _load_registry()

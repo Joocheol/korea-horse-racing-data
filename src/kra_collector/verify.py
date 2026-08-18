@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from .cli import month_range
-from .client import parse_envelope, sha256_bytes
+from .client import KRAResponseError, parse_envelope, sha256_bytes
 from .collect import ENFORCED_GATES, UNRUN_PILOT_GATES, canonical_json, write_atomic
 from .registry import ENDPOINTS
 
@@ -67,16 +68,33 @@ def main(argv: list[str] | None = None) -> int:
         errors.append(f"missing_logical_requests={len(missing)}")
 
     verified_rows = 0
+    zero_row_logical_requests = 0
     for key, record in records.items():
         if key not in expected:
             continue
         total_count = int(record["total_count"])
+        if total_count == 0:
+            zero_row_logical_requests += 1
         if int(record["stored_rows"]) != total_count:
             errors.append(f"stored_rows_mismatch:{key}")
             continue
 
         raw_row_hashes: set[str] = set()
-        for page in record.get("pages", []):
+        pages = record.get("pages", [])
+        page_size = int(
+            record.get("canonical_params_without_service_key", {}).get("numOfRows", 0)
+        )
+        expected_page_count = (
+            max(1, math.ceil(total_count / page_size)) if page_size > 0 else 0
+        )
+        page_numbers = [int(page.get("page_no", 0)) for page in pages]
+        if page_size <= 0:
+            errors.append(f"invalid_page_size:{key}")
+        if page_numbers != list(range(1, expected_page_count + 1)):
+            errors.append(f"page_sequence_mismatch:{key}")
+        if int(record.get("page_count", -1)) != expected_page_count:
+            errors.append(f"page_count_mismatch:{key}")
+        for page in pages:
             path = root / page["raw_path"]
             if not path.exists():
                 errors.append(f"raw_missing:{key}:{page['page_no']}")
@@ -85,9 +103,24 @@ def main(argv: list[str] | None = None) -> int:
             if sha256_bytes(content) != page["raw_sha256"]:
                 errors.append(f"raw_hash_mismatch:{key}:{page['page_no']}")
                 continue
-            envelope = parse_envelope(content, page.get("content_type", ""))
+            try:
+                envelope = parse_envelope(content, page.get("content_type", ""), "json")
+            except KRAResponseError:
+                errors.append(f"raw_envelope_invalid:{key}:{page['page_no']}")
+                continue
             if envelope.total_count != total_count:
                 errors.append(f"page_total_count_mismatch:{key}:{page['page_no']}")
+            page_no = int(page["page_no"])
+            expected_rows = (
+                page_size
+                if page_no < expected_page_count
+                else max(0, total_count - page_size * (expected_page_count - 1))
+            )
+            if (
+                len(envelope.rows) != expected_rows
+                or int(page.get("returned_rows", -1)) != expected_rows
+            ):
+                errors.append(f"page_row_count_mismatch:{key}:{page_no}")
             for row in envelope.rows:
                 row_hash = sha256_bytes(canonical_json(row))
                 if row_hash in raw_row_hashes:
@@ -101,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         if not probe:
             errors.append(f"terminal_probe_missing:{key}")
         else:
+            expected_probe_page = expected_page_count + 1
+            if int(probe.get("page_no", 0)) != expected_probe_page:
+                errors.append(f"terminal_probe_page_mismatch:{key}")
             probe_path = root / probe["raw_path"]
             if not probe_path.exists():
                 errors.append(f"terminal_probe_raw_missing:{key}")
@@ -108,9 +144,13 @@ def main(argv: list[str] | None = None) -> int:
                 probe_content = probe_path.read_bytes()
                 if sha256_bytes(probe_content) != probe["raw_sha256"]:
                     errors.append(f"terminal_probe_hash_mismatch:{key}")
-                probe_envelope = parse_envelope(
-                    probe_content, probe.get("content_type", "")
-                )
+                try:
+                    probe_envelope = parse_envelope(
+                        probe_content, probe.get("content_type", ""), "json"
+                    )
+                except KRAResponseError:
+                    errors.append(f"terminal_probe_envelope_invalid:{key}")
+                    continue
                 if probe_envelope.rows or probe_envelope.total_count != total_count:
                     errors.append(f"terminal_probe_not_empty:{key}")
 
@@ -134,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
             errors.append(f"normalized_raw_set_mismatch:{key}")
         verified_rows += len(normalized_hashes)
 
+    if expected and verified_rows == 0:
+        errors.append("all_zero_snapshot_has_no_positive_row_evidence")
+
     report = {
         "schema_version": "1",
         "snapshot_id": args.snapshot_id,
@@ -141,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         "expected_logical_requests": len(expected),
         "complete_logical_requests": len(set(records) & expected),
         "verified_rows": verified_rows,
+        "zero_row_logical_requests": zero_row_logical_requests,
         "enforced_gates": ENFORCED_GATES,
         "unrun_pilot_gates": UNRUN_PILOT_GATES,
         "pilot_promotion_ready": False,

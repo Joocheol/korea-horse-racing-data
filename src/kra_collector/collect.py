@@ -194,11 +194,10 @@ class Collector:
         year_month: str,
         pool: str | None,
     ) -> ManifestRecord:
-        record_key = self._record_key(spec.endpoint_id, meet, year_month, pool)
-        previous = self._completed.get(record_key)
-        if previous is not None and self._record_files_are_valid(previous):
-            return replace(previous, resumed=True)
-
+        if spec.pool_param == "required" and pool is None:
+            raise KRAResponseError(f"pool is required for {spec.endpoint_id}")
+        if spec.pool_param == "prohibited" and pool is not None:
+            raise KRAResponseError(f"pool is prohibited for {spec.endpoint_id}")
         base_params: dict[str, Any] = {
             "meet": meet,
             "rc_month": year_month.replace("-", ""),
@@ -209,6 +208,20 @@ class Collector:
             base_params["pool"] = pool
 
         logical_id = request_id(spec.endpoint_id, base_params)
+        record_key = self._record_key(spec.endpoint_id, meet, year_month, pool)
+        previous = self._completed.get(record_key)
+        if previous is not None:
+            if (
+                previous.request_id != logical_id
+                or previous.schema_version != "1"
+                or previous.collector_commit != self.collector_commit
+            ):
+                raise KRAResponseError(
+                    "resume identity differs from the current request or collector; "
+                    "use a new snapshot_id"
+                )
+            if self._record_files_are_valid(previous):
+                return replace(previous, resumed=True)
         pages: list[PageRecord] = []
         rows: list[dict[str, Any]] = []
         seen_rows: set[str] = set()
@@ -217,7 +230,18 @@ class Collector:
 
         while True:
             page_params = {**base_params, "pageNo": page_no}
+            if not set(spec.required_params) <= set(page_params):
+                raise KRAResponseError(
+                    f"required params missing for {spec.endpoint_id}"
+                )
             content, content_type, envelope = self.client.get(spec.path, page_params)
+            if (
+                envelope.response_format != spec.response_format
+                or envelope.result_code not in spec.success_codes
+            ):
+                raise KRAResponseError(
+                    f"response violates endpoint registry for {spec.endpoint_id}"
+                )
             if expected_total is None:
                 expected_total = envelope.total_count
             elif envelope.total_count != expected_total:
@@ -270,42 +294,46 @@ class Collector:
                 f"{len(rows)} != {expected_total}"
             )
 
-        if expected_total == 0:
-            terminal_probe = pages[0]
-        else:
-            probe_page_no = page_no + 1
-            probe_params = {**base_params, "pageNo": probe_page_no}
-            probe_content, probe_content_type, probe_envelope = self.client.get(
-                spec.path, probe_params
+        probe_page_no = page_no + 1
+        probe_params = {**base_params, "pageNo": probe_page_no}
+        probe_content, probe_content_type, probe_envelope = self.client.get(
+            spec.path, probe_params
+        )
+        if (
+            probe_envelope.response_format != spec.response_format
+            or probe_envelope.result_code not in spec.success_codes
+        ):
+            raise KRAResponseError(
+                f"terminal response violates endpoint registry for {spec.endpoint_id}"
             )
-            if probe_envelope.total_count != expected_total:
-                raise KRAResponseError(
-                    f"terminal probe totalCount changed for {spec.endpoint_id}: "
-                    f"{expected_total} -> {probe_envelope.total_count}"
-                )
-            if probe_envelope.rows:
-                raise KRAResponseError(
-                    f"terminal page is not empty for {spec.endpoint_id} "
-                    f"meet={meet} month={year_month} pool={pool}"
-                )
-            pool_part = pool or "ALL"
-            probe_relative = (
-                Path("raw")
-                / spec.endpoint_id
-                / str(meet)
-                / year_month
-                / pool_part
-                / f"probe-page-{probe_page_no:05d}.{probe_envelope.response_format}"
+        if probe_envelope.total_count != expected_total:
+            raise KRAResponseError(
+                f"terminal probe totalCount changed for {spec.endpoint_id}: "
+                f"{expected_total} -> {probe_envelope.total_count}"
             )
-            write_atomic(self.output_dir / probe_relative, probe_content)
-            terminal_probe = PageRecord(
-                page_no=probe_page_no,
-                returned_rows=0,
-                raw_path=probe_relative.as_posix(),
-                raw_sha256=sha256_bytes(probe_content),
-                content_type=probe_content_type,
-                response_format=probe_envelope.response_format,
+        if probe_envelope.rows:
+            raise KRAResponseError(
+                f"terminal page is not empty for {spec.endpoint_id} "
+                f"meet={meet} month={year_month} pool={pool}"
             )
+        pool_part = pool or "ALL"
+        probe_relative = (
+            Path("raw")
+            / spec.endpoint_id
+            / str(meet)
+            / year_month
+            / pool_part
+            / f"probe-page-{probe_page_no:05d}.{probe_envelope.response_format}"
+        )
+        write_atomic(self.output_dir / probe_relative, probe_content)
+        terminal_probe = PageRecord(
+            page_no=probe_page_no,
+            returned_rows=0,
+            raw_path=probe_relative.as_posix(),
+            raw_sha256=sha256_bytes(probe_content),
+            content_type=probe_content_type,
+            response_format=probe_envelope.response_format,
+        )
 
         normalized_relative = (
             Path("normalized")

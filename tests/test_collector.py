@@ -10,8 +10,10 @@ import requests
 
 from kra_collector.cli import month_range
 from kra_collector.client import (
+    KRAAuthenticationError,
     KRAClient,
     KRAResponseError,
+    KRARetryableResponseError,
     ParsedEnvelope,
     parse_envelope,
     service_key_candidates,
@@ -107,6 +109,48 @@ def test_parse_json_envelope() -> None:
     parsed = parse_envelope(json.dumps(payload).encode(), "application/json")
     assert parsed.total_count == 1
     assert parsed.rows == [{"rcDate": 20210515}]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "OpenAPI_ServiceResponse": {
+                "cmmMsgHeader": {
+                    "returnReasonCode": "22",
+                    "errMsg": "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+                }
+            }
+        },
+        {
+            "returnReasonCode": "22",
+            "errMsg": "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+        },
+    ],
+)
+def test_http_200_json_quota_envelope_is_retryable(payload: dict[str, object]) -> None:
+    with pytest.raises(KRARetryableResponseError):
+        parse_envelope(json.dumps(payload).encode(), "application/json")
+
+
+def test_http_200_xml_auth_envelope_is_not_zero_rows() -> None:
+    payload = b"""<OpenAPI_ServiceResponse><cmmMsgHeader>
+    <returnReasonCode>30</returnReasonCode>
+    <returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg>
+    </cmmMsgHeader></OpenAPI_ServiceResponse>"""
+    with pytest.raises(KRAAuthenticationError):
+        parse_envelope(payload, "application/xml")
+
+
+def test_success_envelope_requires_total_count() -> None:
+    payload = {
+        "response": {
+            "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+            "body": {"items": {}},
+        }
+    }
+    with pytest.raises(KRAResponseError, match="totalCount"):
+        parse_envelope(json.dumps(payload).encode(), "application/json")
 
 
 def test_month_range_is_inclusive() -> None:
@@ -254,6 +298,104 @@ def test_complete_manifest_and_hashes_enable_resume(tmp_path: Path) -> None:
     assert resumed.resumed is True
 
 
+def test_resume_rejects_changed_request_identity(tmp_path: Path) -> None:
+    first = Collector(
+        TwoPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="resume-identity",
+    )
+    first.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    changed = Collector(
+        FailIfCalledClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=3,
+        snapshot_id="resume-identity",
+    )
+    with pytest.raises(KRAResponseError, match="resume identity"):
+        changed.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
+class ZeroPageClient:
+    def get(self, path: str, params: dict[str, object]):
+        payload = {
+            "response": {
+                "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+                "body": {"items": {}, "totalCount": 0},
+            }
+        }
+        content = json.dumps(payload).encode()
+        return (
+            content,
+            "application/json",
+            ParsedEnvelope([], 0, "00", "NORMAL", "json"),
+        )
+
+
+def test_all_zero_snapshot_fails_and_uses_a_real_page_two_probe(tmp_path: Path) -> None:
+    collector = Collector(
+        ZeroPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=100,
+        snapshot_id="all-zero",
+    )
+    record = collector.collect_month(ENDPOINTS["api28"], 1, "2020-04", None)
+    assert record.terminal_probe is not None
+    assert record.terminal_probe["page_no"] == 2
+    result = verify_main(
+        [
+            "--root",
+            str(tmp_path),
+            "--snapshot-id",
+            "all-zero",
+            "--start",
+            "2020-04",
+            "--end",
+            "2020-04",
+            "--meets",
+            "1",
+            "--endpoints",
+            "api28",
+        ]
+    )
+    assert result == 2
+    report = json.loads((tmp_path / "reports" / "quality-all-zero.json").read_text())
+    assert "all_zero_snapshot_has_no_positive_row_evidence" in report["errors"]
+
+
+def test_verifier_rejects_manifest_page_gap(tmp_path: Path) -> None:
+    collector = Collector(
+        TwoPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="page-gap",
+    )
+    collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    manifest_path = tmp_path / "manifests" / "manifest-page-gap.jsonl"
+    record = json.loads(manifest_path.read_text())
+    record["pages"] = record["pages"][1:]
+    manifest_path.write_text(json.dumps(record) + "\n")
+    result = verify_main(
+        [
+            "--root",
+            str(tmp_path),
+            "--snapshot-id",
+            "page-gap",
+            "--start",
+            "2021-05",
+            "--end",
+            "2021-05",
+            "--meets",
+            "1",
+            "--endpoints",
+            "api28",
+        ]
+    )
+    assert result == 2
+    report = json.loads((tmp_path / "reports" / "quality-page-gap.json").read_text())
+    assert any(error.startswith("page_sequence_mismatch") for error in report["errors"])
+
+
 class MainRequestFailureSession:
     def __init__(self) -> None:
         self.calls = 0
@@ -301,6 +443,19 @@ def test_machine_readable_gate_registry_matches_collector() -> None:
     assert registry["full_pilot_required"] == UNRUN_PILOT_GATES
 
 
+def test_endpoint_registry_freezes_transport_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    registry = json.loads((root / "config" / "endpoints.yml").read_text())
+    assert set(registry["endpoints"]) == set(ENDPOINTS)
+    for endpoint_id, spec in ENDPOINTS.items():
+        frozen = registry["endpoints"][endpoint_id]
+        assert frozen["response_format"] == spec.response_format == "json"
+        assert "totalCount" in frozen["pagination"]
+        assert set(spec.success_codes)
+        if spec.pool_param == "required":
+            assert all(pool is not None for pool in spec.pools)
+
+
 def test_evidence_registry_never_fabricates_missing_hashes() -> None:
     root = Path(__file__).resolve().parents[1]
     claims = [
@@ -310,6 +465,14 @@ def test_evidence_registry_never_fabricates_missing_hashes() -> None:
     ]
     assert claims
     for claim in claims:
+        assert {
+            "status",
+            "observed_at",
+            "run_id",
+            "endpoint_version",
+            "supersedes",
+        } <= set(claim)
         if claim["reproduce_required"]:
+            assert claim["status"] == "reproduce_required"
             assert claim["request_key"] is None
             assert claim["raw_sha256"] is None

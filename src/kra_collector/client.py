@@ -83,33 +83,60 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
 
 
+def _raise_application_error(code: str, message: str) -> None:
+    error_text = f"{code} {message}".upper()
+    if any(
+        token in error_text
+        for token in ("SERVICE_KEY", "SERVICE KEY", "AUTH", "REGISTERED", "인증")
+    ):
+        raise KRAAuthenticationError(f"KRA application error: {code or 'unknown'}")
+    if code in RETRYABLE_RESULT_CODES or any(
+        token in error_text
+        for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE", "초과")
+    ):
+        raise KRARetryableResponseError(
+            f"KRA temporary application error: {code or 'unknown'}"
+        )
+    raise KRAResponseError(f"KRA application error: {code or 'unknown'} {message}")
+
+
 def _parse_json(payload: Any) -> ParsedEnvelope:
     if not isinstance(payload, dict):
         raise KRAResponseError("JSON response root is not an object")
+    service_error = payload.get("OpenAPI_ServiceResponse", payload)
+    if isinstance(service_error, dict):
+        common = service_error.get("cmmMsgHeader", service_error)
+        if isinstance(common, dict) and any(
+            key in common for key in ("returnReasonCode", "returnAuthMsg", "errMsg")
+        ):
+            code = str(common.get("returnReasonCode", "")).strip()
+            message = " ".join(
+                str(common.get(key, "")).strip()
+                for key in ("returnAuthMsg", "errMsg")
+                if common.get(key)
+            )
+            _raise_application_error(code, message)
     root = payload.get("response", payload)
-    header = root.get("header", {}) if isinstance(root, dict) else {}
-    body = root.get("body", {}) if isinstance(root, dict) else {}
+    if not isinstance(root, dict) or not isinstance(root.get("header"), dict):
+        raise KRAResponseError("JSON response is missing the success header")
+    if not isinstance(root.get("body"), dict):
+        raise KRAResponseError("JSON response is missing the success body")
+    header = root["header"]
+    body = root["body"]
     result_code = str(header.get("resultCode", root.get("resultCode", ""))).strip()
     result_message = str(header.get("resultMsg", root.get("resultMsg", ""))).strip()
-    if result_code and result_code not in SUCCESS_CODES:
-        error_text = f"{result_code} {result_message}".upper()
-        if "SERVICE_KEY" in error_text or "AUTH" in error_text:
-            raise KRAAuthenticationError(f"KRA application error: {result_code}")
-        if result_code in RETRYABLE_RESULT_CODES or any(
-            token in error_text for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE")
-        ):
-            raise KRARetryableResponseError(
-                f"KRA temporary application error: {result_code}"
-            )
-        raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
+    if not result_code:
+        raise KRAResponseError("JSON response is missing resultCode")
+    if result_code not in SUCCESS_CODES:
+        _raise_application_error(result_code, result_message)
 
     items = body.get("items", {}) if isinstance(body, dict) else {}
     if isinstance(items, dict):
         items = items.get("item", [])
     rows = [row for row in _as_list(items) if isinstance(row, dict)]
-    total_raw = (
-        body.get("totalCount", len(rows)) if isinstance(body, dict) else len(rows)
-    )
+    if "totalCount" not in body:
+        raise KRAResponseError("JSON response is missing totalCount")
+    total_raw = body["totalCount"]
     try:
         total_count = int(total_raw)
     except (TypeError, ValueError) as exc:
@@ -124,23 +151,29 @@ def _parse_xml(content: bytes) -> ParsedEnvelope:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise KRAResponseError("response is neither valid JSON nor XML") from exc
+    reason_code = (root.findtext(".//returnReasonCode") or "").strip()
+    reason_message = " ".join(
+        value.strip()
+        for value in (
+            root.findtext(".//returnAuthMsg") or "",
+            root.findtext(".//errMsg") or "",
+        )
+        if value.strip()
+    )
+    if reason_code or reason_message or root.tag.endswith("OpenAPI_ServiceResponse"):
+        _raise_application_error(reason_code, reason_message)
     result_code = (root.findtext(".//resultCode") or "").strip()
     result_message = (root.findtext(".//resultMsg") or "").strip()
-    if result_code and result_code not in SUCCESS_CODES:
-        error_text = f"{result_code} {result_message}".upper()
-        if "SERVICE_KEY" in error_text or "AUTH" in error_text:
-            raise KRAAuthenticationError(f"KRA application error: {result_code}")
-        if result_code in RETRYABLE_RESULT_CODES or any(
-            token in error_text for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE")
-        ):
-            raise KRARetryableResponseError(
-                f"KRA temporary application error: {result_code}"
-            )
-        raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
+    if not result_code:
+        raise KRAResponseError("XML response is missing resultCode")
+    if result_code not in SUCCESS_CODES:
+        _raise_application_error(result_code, result_message)
     rows: list[dict[str, Any]] = []
     for item in root.findall(".//items/item"):
         rows.append({child.tag: child.text for child in list(item)})
-    total_raw = root.findtext(".//totalCount") or len(rows)
+    total_raw = root.findtext(".//totalCount")
+    if total_raw is None:
+        raise KRAResponseError("XML response is missing totalCount")
     try:
         total_count = int(total_raw)
     except (TypeError, ValueError) as exc:
@@ -148,14 +181,22 @@ def _parse_xml(content: bytes) -> ParsedEnvelope:
     return ParsedEnvelope(rows, total_count, result_code or "00", result_message, "xml")
 
 
-def parse_envelope(content: bytes, content_type: str = "") -> ParsedEnvelope:
+def parse_envelope(
+    content: bytes, content_type: str = "", expected_format: str | None = None
+) -> ParsedEnvelope:
     stripped = content.lstrip()
     if "json" in content_type.lower() or stripped.startswith((b"{", b"[")):
         try:
-            return _parse_json(json.loads(content.decode("utf-8-sig")))
+            parsed = _parse_json(json.loads(content.decode("utf-8-sig")))
+            if expected_format and parsed.response_format != expected_format:
+                raise KRAResponseError("response format differs from endpoint registry")
+            return parsed
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
-    return _parse_xml(content)
+    parsed = _parse_xml(content)
+    if expected_format and parsed.response_format != expected_format:
+        raise KRAResponseError("response format differs from endpoint registry")
+    return parsed
 
 
 class KRAClient:
@@ -273,7 +314,7 @@ class KRAClient:
                 content = response.content
                 self._assert_body_has_no_secret(content)
                 envelope = parse_envelope(
-                    content, response.headers.get("Content-Type", "")
+                    content, response.headers.get("Content-Type", ""), "json"
                 )
                 return content, response.headers.get("Content-Type", ""), envelope
             except KRAAuthenticationError:

@@ -1,0 +1,57 @@
+{
+  "schema_version": "1",
+  "endpoints": {
+    "api28": {
+      "service": "API28_1",
+      "operation": "singlePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "pool_param": "prohibited",
+      "market_codes": [null]
+    },
+    "api29": {
+      "service": "API29_1",
+      "operation": "doublePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "pool_param": "prohibited",
+      "market_codes": [null]
+    },
+    "api30": {
+      "service": "API30_1",
+      "operation": "triplePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pool", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "pool_param": "required",
+      "market_codes": ["TLA", "TRI"]
+    },
+    "api179": {
+      "service": "API179_1",
+      "operation": "salesAndDividendRate_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "pool_param": "prohibited",
+      "market_codes": [null]
+    }
+  }
+}
