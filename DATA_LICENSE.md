@@ -6,12 +6,13 @@ Project source code and project-authored documentation are released under the re
 License. Source racing data are not blanket-relicensed by this project. Each data release inherits
 the official permission and attribution terms of every source that contributed to that release.
 
-An annual partition is public only when every contributing endpoint has a recorded catalog URL,
-use scope, Public Nuri/attribution type, verification date, terms-text hash, next verification date,
-and separate determinations for bulk raw-response and normalized-fact redistribution. If any source
-remains unverified, records depending on it are withheld. Derived states may be released only after
-they are recomputed without that source and, when evidence becomes insufficient, downgraded to
-`evidence_insufficient`.
+Each asset is gated separately. An annual partition may publish normalized facts only when every
+contributing endpoint has a recorded catalog URL, use scope, Public Nuri/attribution type,
+verification date, terms-text hash, next verification date, and permission for normalized-fact
+redistribution. Bulk raw responses are added only where bulk raw redistribution is separately
+confirmed. If normalized-fact permission for a source remains unverified, records depending on it
+are withheld. Derived states may be released only after they are recomputed without that source and,
+when evidence becomes insufficient, downgraded to `evidence_insufficient`.
 
 ## Endpoint register
 
@@ -29,6 +30,7 @@ behavioral evidence must be read from `docs/API_FINDINGS.md`, not inferred from 
 | `API26_2/entrySheet_2` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
 | `API214_1/RaceDetailResult_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
 | `API4_3/raceResult_3` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
+| `API72_2/racePlan_2` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked; path unverified |
 | `API301/Dividend_rate_total` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
 
 An investigated catalog page checked on 2026-08-18 described its portal use scope as unrestricted.
@@ -47,6 +49,8 @@ Every release includes the following text, expanded with endpoint URLs and the v
 
 The release-specific `DATA-LICENSE-YYYY-vN.txt` states the most restrictive compatible terms that
 apply to the partition. It does not imply ownership of KRA source facts or waive source conditions.
+It also declares `final` or `provisional_api_only`. A provisional release states prominently that
+whole-meeting-day omission could not be checked against an independent schedule denominator.
 
 ## Exclusions
 
