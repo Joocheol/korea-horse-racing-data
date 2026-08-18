@@ -10,10 +10,10 @@ from urllib.parse import quote, unquote
 
 import requests
 
-
 BASE_URL = "https://apis.data.go.kr/B551015"
 SUCCESS_CODES = {"00", "0000", "NORMAL_CODE", "NORMAL SERVICE."}
 RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+RETRYABLE_RESULT_CODES = {"22"}
 PROBE_PATH = "API5/quinellaOddsInfo"
 PROBE_PARAMS = {
     "meet": 1,
@@ -37,6 +37,10 @@ class KRAResponseError(KRAError):
     """The response is not a successful KRA data envelope."""
 
 
+class KRARetryableResponseError(KRAError):
+    """A temporary KRA application-envelope failure that may be retried."""
+
+
 def service_key_candidates(value: str) -> list[tuple[str, str]]:
     """Return candidates without guessing the key format from its appearance."""
     key = value.strip()
@@ -52,7 +56,15 @@ def service_key_candidates(value: str) -> list[tuple[str, str]]:
 
 
 def secret_fingerprints(key: str) -> tuple[bytes, ...]:
-    variants = {key, quote(key, safe=""), quote(key, safe="").lower()}
+    decoded = unquote(key)
+    variants = {
+        key,
+        decoded,
+        quote(key, safe=""),
+        quote(key, safe="").lower(),
+        quote(decoded, safe=""),
+        quote(decoded, safe="").lower(),
+    }
     return tuple(v.encode("utf-8") for v in variants if v)
 
 
@@ -77,28 +89,34 @@ def _parse_json(payload: Any) -> ParsedEnvelope:
     root = payload.get("response", payload)
     header = root.get("header", {}) if isinstance(root, dict) else {}
     body = root.get("body", {}) if isinstance(root, dict) else {}
-    result_code = str(
-        header.get("resultCode", root.get("resultCode", ""))
-    ).strip()
-    result_message = str(
-        header.get("resultMsg", root.get("resultMsg", ""))
-    ).strip()
+    result_code = str(header.get("resultCode", root.get("resultCode", ""))).strip()
+    result_message = str(header.get("resultMsg", root.get("resultMsg", ""))).strip()
     if result_code and result_code not in SUCCESS_CODES:
         error_text = f"{result_code} {result_message}".upper()
         if "SERVICE_KEY" in error_text or "AUTH" in error_text:
             raise KRAAuthenticationError(f"KRA application error: {result_code}")
+        if result_code in RETRYABLE_RESULT_CODES or any(
+            token in error_text for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE")
+        ):
+            raise KRARetryableResponseError(
+                f"KRA temporary application error: {result_code}"
+            )
         raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
 
     items = body.get("items", {}) if isinstance(body, dict) else {}
     if isinstance(items, dict):
         items = items.get("item", [])
     rows = [row for row in _as_list(items) if isinstance(row, dict)]
-    total_raw = body.get("totalCount", len(rows)) if isinstance(body, dict) else len(rows)
+    total_raw = (
+        body.get("totalCount", len(rows)) if isinstance(body, dict) else len(rows)
+    )
     try:
         total_count = int(total_raw)
     except (TypeError, ValueError) as exc:
         raise KRAResponseError(f"invalid totalCount: {total_raw!r}") from exc
-    return ParsedEnvelope(rows, total_count, result_code or "00", result_message, "json")
+    return ParsedEnvelope(
+        rows, total_count, result_code or "00", result_message, "json"
+    )
 
 
 def _parse_xml(content: bytes) -> ParsedEnvelope:
@@ -112,6 +130,12 @@ def _parse_xml(content: bytes) -> ParsedEnvelope:
         error_text = f"{result_code} {result_message}".upper()
         if "SERVICE_KEY" in error_text or "AUTH" in error_text:
             raise KRAAuthenticationError(f"KRA application error: {result_code}")
+        if result_code in RETRYABLE_RESULT_CODES or any(
+            token in error_text for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE")
+        ):
+            raise KRARetryableResponseError(
+                f"KRA temporary application error: {result_code}"
+            )
         raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
     rows: list[dict[str, Any]] = []
     for item in root.findall(".//items/item"):
@@ -150,7 +174,11 @@ class KRAClient:
         self.session = session or requests.Session()
         self._last_request_at = 0.0
         self.service_key, self.key_candidate = self._probe_service_key(service_key)
-        self._secret_fingerprints = secret_fingerprints(self.service_key)
+        self._secret_fingerprints = tuple(
+            set(
+                secret_fingerprints(service_key) + secret_fingerprints(self.service_key)
+            )
+        )
 
     def _probe_service_key(self, raw_service_key: str) -> tuple[str, str]:
         """Select the working key candidate by calling an approved API.
@@ -167,7 +195,9 @@ class KRAClient:
                     f"{BASE_URL}/{PROBE_PATH}",
                     params={"serviceKey": candidate, **PROBE_PARAMS},
                     timeout=self.timeout_seconds,
-                    headers={"User-Agent": "korea-horse-racing-data/0.1 (+public research)"},
+                    headers={
+                        "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
+                    },
                 )
             except requests.RequestException as exc:
                 raise KRAResponseError(
@@ -186,7 +216,9 @@ class KRAClient:
                 continue
 
             try:
-                parse_envelope(response.content, response.headers.get("Content-Type", ""))
+                parse_envelope(
+                    response.content, response.headers.get("Content-Type", "")
+                )
             except KRAAuthenticationError:
                 failures.append(f"{label}:authentication_rejected")
             except KRAResponseError:
@@ -201,12 +233,16 @@ class KRAClient:
 
     def _assert_body_has_no_secret(self, content: bytes) -> None:
         if any(token in content for token in self._secret_fingerprints):
-            raise KRAResponseError("response body unexpectedly contains the service key")
+            raise KRAResponseError(
+                "response body unexpectedly contains the service key"
+            )
 
-    def get(self, path: str, params_without_key: dict[str, Any]) -> tuple[bytes, str, ParsedEnvelope]:
+    def get(
+        self, path: str, params_without_key: dict[str, Any]
+    ) -> tuple[bytes, str, ParsedEnvelope]:
         url = f"{BASE_URL}/{path}"
         params = {"serviceKey": self.service_key, **params_without_key}
-        last_error: Exception | None = None
+        last_status: int | None = None
         for attempt in range(1, self.max_attempts + 1):
             elapsed = time.monotonic() - self._last_request_at
             if elapsed < self.minimum_interval_seconds:
@@ -216,28 +252,50 @@ class KRAClient:
                     url,
                     params=params,
                     timeout=self.timeout_seconds,
-                    headers={"User-Agent": "korea-horse-racing-data/0.1 (+public research)"},
+                    headers={
+                        "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
+                    },
                 )
                 self._last_request_at = time.monotonic()
                 if response.status_code in RETRYABLE_HTTP:
+                    last_status = response.status_code
                     retry_after = response.headers.get("Retry-After")
-                    delay = float(retry_after) if retry_after and retry_after.isdigit() else 2 ** (attempt - 1)
-                    time.sleep(min(delay, 30.0))
+                    delay = (
+                        float(retry_after)
+                        if retry_after and retry_after.isdigit()
+                        else 2 ** (attempt - 1)
+                    )
+                    if attempt < self.max_attempts:
+                        time.sleep(min(delay, 30.0))
                     continue
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    raise KRAResponseError(f"KRA HTTP error: {response.status_code}")
                 content = response.content
                 self._assert_body_has_no_secret(content)
-                envelope = parse_envelope(content, response.headers.get("Content-Type", ""))
+                envelope = parse_envelope(
+                    content, response.headers.get("Content-Type", "")
+                )
                 return content, response.headers.get("Content-Type", ""), envelope
             except KRAAuthenticationError:
                 raise
-            except (requests.RequestException, KRAResponseError) as exc:
-                last_error = exc
+            except KRAResponseError:
+                raise
+            except KRARetryableResponseError:
                 if attempt < self.max_attempts:
                     time.sleep(min(2 ** (attempt - 1), 30.0))
                     continue
                 break
-        raise KRAResponseError(f"request failed after {self.max_attempts} attempts") from last_error
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt < self.max_attempts:
+                    time.sleep(min(2 ** (attempt - 1), 30.0))
+                    continue
+                break
+            except requests.RequestException:
+                raise KRAResponseError("KRA transport error") from None
+        suffix = f"; last_http_status={last_status}" if last_status is not None else ""
+        raise KRARetryableResponseError(
+            f"request failed after {self.max_attempts} attempts{suffix}"
+        ) from None
 
 
 def sha256_bytes(content: bytes) -> str:

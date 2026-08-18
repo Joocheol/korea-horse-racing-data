@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from .client import KRAAuthenticationError, KRAClient, KRAError
-from .collect import Collector
+from .collect import UNRUN_PILOT_GATES, Collector, canonical_json, write_atomic
 from .registry import ENDPOINTS
 
 
@@ -30,7 +31,9 @@ def month_range(start: str, end: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Collect KRA OpenAPI data with manifests")
+    parser = argparse.ArgumentParser(
+        description="Collect KRA OpenAPI data with manifests"
+    )
     parser.add_argument("--start", default="2020-01", help="first month, YYYY-MM")
     parser.add_argument("--end", default="2021-12", help="last month, YYYY-MM")
     parser.add_argument("--meets", default="1,2,3", help="comma-separated meet codes")
@@ -41,7 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", default="data/pilot-2020-2021")
     parser.add_argument("--page-size", type=int, default=100_000)
-    parser.add_argument("--snapshot-id", default=os.environ.get("GITHUB_RUN_ID"))
+    parser.add_argument("--snapshot-id")
+    parser.add_argument("--plan-output")
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -61,25 +65,32 @@ def main(argv: list[str] | None = None) -> int:
         len(ENDPOINTS[endpoint_id].pools) * len(meets) * len(months)
         for endpoint_id in endpoint_ids
     )
-    print(
-        json.dumps(
-            {
-                "start": args.start,
-                "end": args.end,
-                "meets": meets,
-                "endpoints": endpoint_ids,
-                "logical_requests_before_pagination": logical_requests,
-                "page_size": args.page_size,
-            },
-            ensure_ascii=False,
-        )
-    )
+    plan = {
+        "start": args.start,
+        "end": args.end,
+        "meets": meets,
+        "endpoints": endpoint_ids,
+        "logical_requests_before_pagination": logical_requests,
+        "minimum_requests_with_terminal_probe": logical_requests * 2,
+        "conservative_request_budget": logical_requests * 3,
+        "page_size": args.page_size,
+        "unrun_pilot_verification_gates": UNRUN_PILOT_GATES,
+        "pilot_promotion_ready": False,
+    }
+    print(json.dumps(plan, ensure_ascii=False))
+    if args.plan_output:
+        write_atomic(Path(args.plan_output), canonical_json(plan) + b"\n")
     if args.dry_run:
         return 0
 
-    secret = os.environ.get("DATA_GO_KR_SERVICE_KEY") or os.environ.get("KRA_SERVICE_KEY")
+    if not args.snapshot_id:
+        raise SystemExit("--snapshot-id is required for collection and resume")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", args.snapshot_id):
+        raise SystemExit("snapshot id must use 1-80 safe filename characters")
+
+    secret = os.environ.get("DATA_GO_KR_SERVICE_KEY")
     if not secret:
-        raise SystemExit("DATA_GO_KR_SERVICE_KEY (or KRA_SERVICE_KEY) is required")
+        raise SystemExit("DATA_GO_KR_SERVICE_KEY is required")
 
     try:
         client = KRAClient(secret)
@@ -89,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.output),
             page_size=args.page_size,
             snapshot_id=args.snapshot_id,
+            key_id=os.environ.get("DATA_GO_KR_KEY_ID", "data-go-kr-service-key"),
         )
         completed = 0
         for month in months:
@@ -108,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
                                     "pool": pool,
                                     "totalCount": record.total_count,
                                     "stored_rows": record.stored_rows,
+                                    "resumed": record.resumed,
                                 },
                                 ensure_ascii=False,
                             )
@@ -115,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
     except (KRAAuthenticationError, KRAError) as exc:
         print(f"collection_failed={type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
+    except Exception:  # noqa: BLE001 - never expose an unexpected secret-bearing URL
+        print("collection_failed=UnexpectedError", file=sys.stderr)
+        return 3
     return 0
 
 

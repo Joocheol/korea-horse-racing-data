@@ -46,4 +46,3 @@ ENDPOINTS: dict[str, EndpointSpec] = {
         collection_grain="month",
     ),
 }
-

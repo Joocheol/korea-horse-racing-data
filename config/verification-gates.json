@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "core_transport": [
+    "all_pages_total_count_constant",
+    "page_row_intersection_empty",
+    "deduplicated_union_equals_total_count",
+    "terminal_page_empty",
+    "raw_sha256_verified",
+    "normalized_content_sha256_verified"
+  ],
+  "full_pilot_required": [
+    "api26_independent_starter_count",
+    "api5_api29_quinella_cell_agreement",
+    "overround_vs_verified_takeout",
+    "turnover_ticket_interval_check",
+    "turnover_and_finish_order_race_classification",
+    "seven_pool_completeness",
+    "quarantine_table_preservation"
+  ]
+}
