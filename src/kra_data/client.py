@@ -69,6 +69,8 @@ class KRAClient:
     ) -> None:
         if not service_key:
             raise ValueError("service_key is required")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
         self._service_key = service_key
         self.timeout = timeout
         self.max_attempts = max_attempts

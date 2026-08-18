@@ -118,6 +118,24 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("checksum mismatch", report["errors"][0])
 
+    def test_partial_pages_are_preserved_after_failure(self) -> None:
+        class FailingClient:
+            def collect_unit(self, unit: RequestUnit, num_rows: int = 100_000, on_page=None) -> list[Page]:
+                first = Page(1, 2, [{"id": 1}])
+                if on_page is not None:
+                    on_page(first)
+                raise RuntimeError("second page failed")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            unit = RequestUnit("single", 1, "202001")
+            with self.assertRaisesRegex(RuntimeError, "second page"):
+                collect_units(FailingClient(), [unit], output)
+            record = Ledger(output / "ledger.json").data["units"][unit.key]
+            self.assertEqual(record["state"], "failed")
+            self.assertEqual(record["partial_page_count"], 1)
+            self.assertTrue((output / record["partial_raw_path"]).is_file())
+
 
 class PlanningTests(unittest.TestCase):
     def test_pilot_unit_count(self) -> None:
