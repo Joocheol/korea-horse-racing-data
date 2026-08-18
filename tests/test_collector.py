@@ -674,6 +674,16 @@ def test_verifier_rejects_missing_terminal_probe(tmp_path: Path) -> None:
     )
     assert any(error.startswith("terminal_probe_missing") for error in report["errors"])
 
+    resumed = Collector(
+        FailIfCalledClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="missing-terminal",
+    ).collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    assert resumed.resumed is True
+    assert resumed.terminal_probe is not None
+    assert resumed.terminal_probe["page_no"] == 3
+
 
 def test_verifier_recomputes_request_identity(tmp_path: Path) -> None:
     collector = Collector(
@@ -995,6 +1005,49 @@ def test_preflight_fails_when_live_row_does_not_support_business_key(
     assert not output.exists()
 
 
+class ZeroThenPositivePreflightClient(FakePreflightClient):
+    def get(self, path: str, params: dict[str, object]):
+        if params["rc_month"] == "202001":
+            content = json.dumps({"month": "202001"}).encode()
+            return (
+                content,
+                "application/json",
+                ParsedEnvelope([], 0, "00", "NORMAL", "json"),
+            )
+        return super().get(path, params)
+
+
+def test_preflight_records_zero_month_then_validates_next_positive_month(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "safe-key")
+    monkeypatch.setenv("KRA_QUOTA_LEDGER", str(tmp_path / "quota.jsonl"))
+    monkeypatch.setattr(preflight, "KRAClient", ZeroThenPositivePreflightClient)
+    output = tmp_path / "preflight.json"
+    assert (
+        preflight.main(
+            [
+                "--start",
+                "2020-01",
+                "--end",
+                "2020-02",
+                "--meets",
+                "1",
+                "--endpoints",
+                "api28",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    probes = json.loads(output.read_text())["approval_probes"]
+    assert [probe["approval_status"] for probe in probes] == [
+        "probe_success_zero_rows",
+        "probe_success_with_schema_evidence",
+    ]
+
+
 def test_artifact_secret_scan_checks_encoded_and_decoded_forms(tmp_path: Path) -> None:
     (tmp_path / "safe.json").write_text('{"ok": true}')
     assert scan_tree(tmp_path, "abc%2Bdef%2Fghi%3D") == []
@@ -1167,8 +1220,8 @@ def test_collection_workflow_has_encrypted_durable_quarantine() -> None:
     assert "kra-private-archive" in workflow
     assert "if: always()" in workflow
     assert "actions/upload-artifact" not in workflow
-    assert "quota-$(date -u +%F).jsonl.gpg" in workflow
+    assert "quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg" in workflow
     assert "group: collect-kra-data-go-kr-key" in workflow
-    assert "${ARTIFACT_NAME}.tar.gz.gpg" in workflow
-    assert "${ARTIFACT_NAME}-scan.json" in workflow
+    assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg" in workflow
+    assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json" in workflow
     assert "${ARTIFACT_NAME}-${SCAN_OUTCOME}" not in workflow

@@ -189,6 +189,103 @@ UNRUN_PILOT_GATES = [
 ]
 
 
+def completed_record_files_are_valid(
+    root: Path, record: ManifestRecord, spec: EndpointSpec
+) -> bool:
+    """Return true only when a completed record satisfies the verifier's file gates."""
+    try:
+        total_count = int(record.total_count)
+        if (
+            record.schema_version != COLLECTOR_SCHEMA_VERSION
+            or record.collector_contract_sha256 != collector_contract_hash(spec)
+            or int(record.stored_rows) != total_count
+        ):
+            return False
+        page_size = int(record.canonical_params_without_service_key["numOfRows"])
+        if page_size <= 0:
+            return False
+        expected_page_count = max(1, math.ceil(total_count / page_size))
+        if record.page_count != expected_page_count:
+            return False
+        page_numbers = [int(page["page_no"]) for page in record.pages]
+        if page_numbers != list(range(1, expected_page_count + 1)):
+            return False
+
+        raw_row_hashes: set[str] = set()
+        business_keys: set[str] = set()
+        for page in record.pages:
+            page_no = int(page["page_no"])
+            raw_path = root / page["raw_path"]
+            if not raw_path.exists():
+                return False
+            content = raw_path.read_bytes()
+            if sha256_bytes(content) != page["raw_sha256"]:
+                return False
+            envelope = parse_envelope(
+                content, page.get("content_type", ""), spec.response_format
+            )
+            expected_rows = (
+                page_size
+                if page_no < expected_page_count
+                else max(0, total_count - page_size * (expected_page_count - 1))
+            )
+            if (
+                envelope.total_count != total_count
+                or len(envelope.rows) != expected_rows
+                or int(page["returned_rows"]) != expected_rows
+            ):
+                return False
+            for row in envelope.rows:
+                row_hash = sha256_bytes(canonical_json(row))
+                row_key = business_key_hash(spec, row)
+                if row_key in business_keys:
+                    return False
+                business_keys.add(row_key)
+                raw_row_hashes.add(row_hash)
+        if len(business_keys) != total_count:
+            return False
+
+        probe = record.terminal_probe
+        if probe is None or int(probe["page_no"]) != expected_page_count + 1:
+            return False
+        probe_path = root / probe["raw_path"]
+        if not probe_path.exists():
+            return False
+        probe_content = probe_path.read_bytes()
+        if sha256_bytes(probe_content) != probe["raw_sha256"]:
+            return False
+        probe_envelope = parse_envelope(
+            probe_content, probe.get("content_type", ""), spec.response_format
+        )
+        if probe_envelope.rows or probe_envelope.total_count != total_count:
+            return False
+
+        normalized_path = root / record.normalized_path
+        if not normalized_path.exists():
+            return False
+        normalized_content = gzip.decompress(normalized_path.read_bytes())
+        if sha256_bytes(normalized_content) != record.normalized_content_sha256:
+            return False
+        normalized_hashes = {
+            sha256_bytes(canonical_json(json.loads(line)))
+            for line in normalized_content.decode("utf-8").splitlines()
+            if line
+        }
+        return normalized_hashes == raw_row_hashes
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        OSError,
+        EOFError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ):
+        return False
+    except KRAResponseError:
+        return False
+
+
 class Collector:
     def __init__(
         self,
@@ -242,33 +339,6 @@ class Collector:
                     )
                 ] = record
         return completed
-
-    def _record_files_are_valid(self, record: ManifestRecord) -> bool:
-        if record.total_count != record.stored_rows:
-            return False
-        for page in record.pages:
-            raw_path = self.output_dir / page["raw_path"]
-            if (
-                not raw_path.exists()
-                or sha256_bytes(raw_path.read_bytes()) != page["raw_sha256"]
-            ):
-                return False
-        if record.terminal_probe is not None:
-            probe_path = self.output_dir / record.terminal_probe["raw_path"]
-            if (
-                not probe_path.exists()
-                or sha256_bytes(probe_path.read_bytes())
-                != record.terminal_probe["raw_sha256"]
-            ):
-                return False
-        normalized_path = self.output_dir / record.normalized_path
-        if not normalized_path.exists():
-            return False
-        try:
-            normalized_content = gzip.decompress(normalized_path.read_bytes())
-        except (OSError, EOFError):
-            return False
-        return sha256_bytes(normalized_content) == record.normalized_content_sha256
 
     def _append_manifest(self, record: ManifestRecord) -> None:
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,7 +523,7 @@ class Collector:
                     "resume identity differs from the current request or collector; "
                     "use a new snapshot_id"
                 )
-            if self._record_files_are_valid(previous):
+            if completed_record_files_are_valid(self.output_dir, previous, spec):
                 return replace(previous, resumed=True)
         (
             pages,

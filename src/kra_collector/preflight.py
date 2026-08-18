@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     budgets: dict[str, dict[str, int | str]] = {}
     for endpoint_id in endpoint_ids:
         logical = len(ENDPOINTS[endpoint_id].pools) * len(meets) * len(months)
-        approval_probes = len(ENDPOINTS[endpoint_id].pools)
+        approval_probes = len(ENDPOINTS[endpoint_id].pools) * len(months)
         conservative = logical * MAX_CALLS_PER_LOGICAL_REQUEST + approval_probes
         cap = _operating_cap(endpoint_id)
         used = used_before[endpoint_id]
@@ -137,52 +137,68 @@ def main(argv: list[str] | None = None) -> int:
         for endpoint_id in endpoint_ids:
             spec = ENDPOINTS[endpoint_id]
             for pool in spec.pools:
-                params: dict[str, object] = {
-                    "meet": meets[0],
-                    "rc_month": months[0].replace("-", ""),
-                    "pageNo": 1,
-                    "numOfRows": 1,
-                    "_type": "json",
-                }
-                if pool is not None:
-                    params["pool"] = pool
-                content, _, envelope = client.get(spec.path, params)
-                if envelope.total_count <= 0 or not envelope.rows:
-                    raise KRAError(
-                        f"business key preflight has no sample row for "
-                        f"{endpoint_id}:{pool}"
-                    )
-                key_hash, observed_aliases = business_key_observation(
-                    spec, envelope.rows[0]
-                )
-                pool_label = str(pool)
-                endpoint_keys = probe_keys.setdefault(endpoint_id, {})
-                if key_hash in endpoint_keys.values():
-                    prior_pool = next(
-                        name
-                        for name, value in endpoint_keys.items()
-                        if value == key_hash
-                    )
-                    raise KRAError(
-                        f"business key preflight collision for {endpoint_id}: "
-                        f"pools {prior_pool} and {pool_label}"
-                    )
-                endpoint_keys[pool_label] = key_hash
-                probes.append(
-                    {
+                found_sample = False
+                for month in months:
+                    params: dict[str, object] = {
+                        "meet": meets[0],
+                        "rc_month": month.replace("-", ""),
+                        "pageNo": 1,
+                        "numOfRows": 1,
+                        "_type": "json",
+                    }
+                    if pool is not None:
+                        params["pool"] = pool
+                    content, _, envelope = client.get(spec.path, params)
+                    probe: dict[str, object] = {
                         "endpoint_id": endpoint_id,
                         "pool": pool,
+                        "year_month": month,
                         "result_code": envelope.result_code,
                         "response_format": envelope.response_format,
                         "total_count": envelope.total_count,
                         "raw_sha256": sha256_bytes(content),
-                        "business_key_sha256": key_hash,
-                        "observed_business_key_aliases": observed_aliases,
                     }
-                )
+                    if envelope.total_count <= 0 or not envelope.rows:
+                        probe["approval_status"] = "probe_success_zero_rows"
+                        probes.append(probe)
+                        continue
+                    key_hash, observed_aliases = business_key_observation(
+                        spec, envelope.rows[0]
+                    )
+                    pool_label = str(pool)
+                    endpoint_keys = probe_keys.setdefault(endpoint_id, {})
+                    if key_hash in endpoint_keys.values():
+                        prior_pool = next(
+                            name
+                            for name, value in endpoint_keys.items()
+                            if value == key_hash
+                        )
+                        raise KRAError(
+                            f"business key preflight collision for {endpoint_id}: "
+                            f"pools {prior_pool} and {pool_label}"
+                        )
+                    endpoint_keys[pool_label] = key_hash
+                    probe.update(
+                        {
+                            "approval_status": "probe_success_with_schema_evidence",
+                            "business_key_sha256": key_hash,
+                            "observed_business_key_aliases": observed_aliases,
+                        }
+                    )
+                    probes.append(probe)
+                    found_sample = True
+                    break
+                if not found_sample:
+                    raise KRAError(
+                        f"business key preflight found no positive-row month in the "
+                        f"requested range for {endpoint_id}:{pool}"
+                    )
             budgets[endpoint_id]["approval_status"] = "probe_success"
     except KRAError as exc:
         print(f"preflight_failed={type(exc).__name__}: {exc}")
+        return 2
+    except Exception:  # noqa: BLE001 - never expose a secret-bearing request URL
+        print("preflight_failed=UnexpectedError")
         return 2
 
     used_after = _usage_today(ledger_path)

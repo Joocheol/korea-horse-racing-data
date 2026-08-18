@@ -30,10 +30,11 @@ business-key SHA-256, 원응답 SHA-256을 preflight 보고서에 남긴다.
 원응답은 공개 Actions artifact에 올리지 않고 AES-256 대칭암호화해
 `kra-private-archive` draft release에만 보존한다. secret scan이 실패한 실행도 같은
 비공개 암호화 경로에 quarantine하며 공개 산출물은 만들지 않는다. 이 draft release는
-공개해서는 안 된다. 수집 직후 고정된 `<snapshot>.tar.gz.gpg` 이름으로 중단 복구용
-체크포인트와 당일 quota ledger를 먼저 갱신하고, 별도 `<snapshot>-scan.json`에
+공개해서는 안 된다. 수집 직후 `<snapshot>-run-<run_id>.tar.gz.gpg` 이름으로 중단
+복구용 체크포인트와 당일 quota ledger를 먼저 저장하고, 같은 실행 ID의 scan JSON에
 `interrupted`, `success`, `failure` 판정을 기록한다. `failure` quarantine은 수동 조사 전
 자동 복원하지 않으며, `interrupted` 체크포인트는 다음 실행에서 복원한 뒤 다시 검사한다.
+실행별 세대를 덮어쓰지 않으므로 업로드 실패가 직전의 정상 체크포인트를 지우지 않는다.
 
 최초 실행 전 저장소에 두 Actions secret이 필요하다. `kra-collection` environment는
 별도로 교수 승인 게이트를 제공한다.

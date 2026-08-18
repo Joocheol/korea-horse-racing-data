@@ -104,24 +104,40 @@ jobs:
               --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
           )"
           asset_id=""
-          scan_asset_id=""
-          if [ -n "$release_id" ]; then
-            asset_id="$(
-              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
-                --jq "map(select(.name == \"${ARTIFACT_NAME}.tar.gz.gpg\")) | last | .id // empty"
-            )"
-            scan_asset_id="$(
-              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
-                --jq "map(select(.name == \"${ARTIFACT_NAME}-scan.json\")) | last | .id // empty"
-            )"
-          fi
+          asset_name=""
           scan_outcome="interrupted"
-          if [ -n "$scan_asset_id" ]; then
-            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${scan_asset_id}" \
-              -H 'Accept: application/octet-stream' > /tmp/kra-scan.json
-            scan_outcome="$(jq -r '.outcome // "interrupted"' /tmp/kra-scan.json)"
+          if [ -n "$release_id" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+              > /tmp/kra-assets.json
+            while IFS=$'\t' read -r candidate_id candidate_name; do
+              stem="${candidate_name%.tar.gz.gpg}"
+              scan_name="${stem}-scan.json"
+              scan_asset_id="$(
+                jq -r --arg name "$scan_name" \
+                  'map(select(.name == $name)) | last | .id // empty' \
+                  /tmp/kra-assets.json
+              )"
+              candidate_outcome="interrupted"
+              if [ -n "$scan_asset_id" ]; then
+                gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${scan_asset_id}" \
+                  -H 'Accept: application/octet-stream' > /tmp/kra-scan.json
+                candidate_outcome="$(jq -r '.outcome // "interrupted"' /tmp/kra-scan.json)"
+              fi
+              if [ "$candidate_outcome" != "failure" ]; then
+                asset_id="$candidate_id"
+                asset_name="$candidate_name"
+                scan_outcome="$candidate_outcome"
+                break
+              fi
+            done < <(
+              jq -r --arg prefix "${ARTIFACT_NAME}-run-" '
+                map(select(.name | startswith($prefix))
+                    | select(.name | endswith(".tar.gz.gpg")))
+                | sort_by(.created_at) | reverse | .[] | [.id, .name] | @tsv
+              ' /tmp/kra-assets.json
+            )
           fi
-          if [ -n "$asset_id" ] && [ "$scan_outcome" != "failure" ]; then
+          if [ -n "$asset_id" ]; then
             umask 077
             printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
             gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
@@ -132,9 +148,8 @@ jobs:
               --decrypt /tmp/kra-resume.tar.gz.gpg
             tar -xzf /tmp/kra-resume.tar.gz -C "$OUTPUT_ROOT"
             echo "restored_durable_asset_id=$asset_id"
+            echo "restored_durable_asset_name=$asset_name"
             echo "restored_scan_outcome=$scan_outcome"
-          elif [ "$scan_outcome" = "failure" ]; then
-            echo "prior_archive_quarantined=true"
           else
             echo "no_prior_artifact=true"
           fi
@@ -212,8 +227,8 @@ jobs:
           fi
           umask 077
           printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
-          archive_name="${ARTIFACT_NAME}.tar.gz.gpg"
-          scan_name="${ARTIFACT_NAME}-scan.json"
+          archive_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json"
           tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file /tmp/kra-archive-passphrase \
@@ -230,7 +245,7 @@ jobs:
           gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
           gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
           if [ -f "$KRA_QUOTA_LEDGER" ]; then
-            quota_name="quota-$(date -u +%F).jsonl.gpg"
+            quota_name="quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg"
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase-file /tmp/kra-archive-passphrase \
               --cipher-algo AES256 \
@@ -273,8 +288,8 @@ jobs:
           fi
           umask 077
           printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
-          archive_name="${ARTIFACT_NAME}.tar.gz.gpg"
-          scan_name="${ARTIFACT_NAME}-scan.json"
+          archive_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json"
           tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file /tmp/kra-archive-passphrase \
@@ -291,7 +306,7 @@ jobs:
           gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
           gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
           if [ -f "$KRA_QUOTA_LEDGER" ]; then
-            quota_name="quota-$(date -u +%F).jsonl.gpg"
+            quota_name="quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg"
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase-file /tmp/kra-archive-passphrase \
               --cipher-algo AES256 \
