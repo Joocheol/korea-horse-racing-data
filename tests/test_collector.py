@@ -1075,6 +1075,19 @@ def test_http_200_daily_quota_envelope_is_not_retried() -> None:
     assert session.calls == 2
 
 
+def test_http_403_is_fatal_authentication_error() -> None:
+    session = ProbeThenScriptedSession([ProbeResponse(b"forbidden", status_code=403)])
+    client = KRAClient(
+        "safe-key",
+        session=session,  # type: ignore[arg-type]
+        minimum_interval_seconds=0,
+        max_attempts=5,
+    )
+    with pytest.raises(KRAAuthenticationError, match="authentication"):
+        client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 1})
+    assert session.calls == 2
+
+
 class FakePreflightClient:
     key_candidate = "as_provided"
 

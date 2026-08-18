@@ -423,6 +423,21 @@ class KRAClient:
                             else min(2 ** (attempt - 1), 30.0)
                         )
                     continue
+                if response.status_code in {401, 403}:
+                    raise KRAAuthenticationError(
+                        f"KRA HTTP authentication error: {response.status_code}"
+                    )
+                if response.status_code == 400 and response.content:
+                    self._assert_body_has_no_secret(response.content)
+                    try:
+                        parse_envelope(
+                            response.content,
+                            response.headers.get("Content-Type", ""),
+                        )
+                    except KRAAuthenticationError:
+                        raise
+                    except KRAError:
+                        pass
                 if response.status_code >= 400:
                     raise KRAResponseError(f"KRA HTTP error: {response.status_code}")
                 content = response.content
