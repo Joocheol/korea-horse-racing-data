@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .client import KRAClient, KRAResponseError, parse_envelope, sha256_bytes
+from .client import KRAClient, KRAError, KRAResponseError, parse_envelope, sha256_bytes
 from .registry import EndpointSpec
 
 COLLECTOR_SCHEMA_VERSION = "2"
@@ -176,8 +176,16 @@ def required_calls_for_total(total_count: int, page_size: int) -> int:
 def write_atomic(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_bytes(content)
+    with temporary.open("wb") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def write_deterministic_jsonl_gz(path: Path, rows: Iterable[dict[str, Any]]) -> str:
@@ -192,7 +200,14 @@ def write_deterministic_jsonl_gz(path: Path, rows: Iterable[dict[str, Any]]) -> 
             line = canonical_json(row) + b"\n"
             digest.update(line)
             gz.write(line)
+        raw_handle.flush()
+        os.fsync(raw_handle.fileno())
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     return digest.hexdigest()
 
 
@@ -373,7 +388,7 @@ def completed_record_files_are_valid(
         json.JSONDecodeError,
     ):
         return False
-    except KRAResponseError:
+    except KRAError:
         return False
 
 
@@ -670,6 +685,23 @@ class Collector:
         ) = self._restore_partial_pages(spec, logical_id, base_params)
         resumed_partial = bool(pages or terminal_probe)
         page_no = len(pages) + 1
+
+        if expected_total is not None:
+            required_calls = required_calls_for_total(expected_total, self.page_size)
+            if required_calls > MAX_CALLS_PER_LOGICAL_REQUEST:
+                raise KRAResponseError(
+                    "resumed logical request exceeds the approved per-request call "
+                    f"budget: {required_calls}>{MAX_CALLS_PER_LOGICAL_REQUEST}"
+                )
+            if (
+                len(rows) < expected_total
+                and pages
+                and 0 < pages[-1].returned_rows < self.page_size
+            ):
+                raise KRAResponseError(
+                    "resumed page ledger shows a server page cap that differs from "
+                    "requested numOfRows; rerun preflight before collection"
+                )
 
         while expected_total is None or len(rows) < expected_total:
             page_params = {**base_params, "pageNo": page_no}

@@ -2,7 +2,7 @@ name: Claude collector implementation review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     paths:
       - 'src/**'
       - 'tests/**'

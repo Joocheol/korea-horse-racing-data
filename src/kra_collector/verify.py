@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .cli import month_range
-from .client import KRAResponseError, parse_envelope, sha256_bytes
+from .client import KRAError, parse_envelope, sha256_bytes
 from .collect import (
     COLLECTOR_SCHEMA_VERSION,
     ENFORCED_GATES,
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             try:
                 envelope = parse_envelope(content, page.get("content_type", ""), "json")
-            except KRAResponseError:
+            except KRAError:
                 errors.append(f"raw_envelope_invalid:{key}:{page['page_no']}")
                 continue
             if envelope.total_count != total_count:
@@ -175,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                         ENDPOINTS[key[0]], row, params
                     )
                     row_key = business_key_hash(ENDPOINTS[key[0]], row)
-                except KRAResponseError:
+                except KRAError:
                     errors.append(
                         f"row_partition_or_business_key_invalid:{key}:{page['page_no']}"
                     )
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                     probe_envelope = parse_envelope(
                         probe_content, probe.get("content_type", ""), "json"
                     )
-                except KRAResponseError:
+                except KRAError:
                     errors.append(f"terminal_probe_envelope_invalid:{key}")
                     continue
                 if probe_envelope.rows or not terminal_probe_total_count_is_valid(
