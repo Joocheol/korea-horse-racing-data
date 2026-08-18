@@ -75,6 +75,45 @@ def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
     return business_key_observation(spec, row)[0]
 
 
+def assert_row_matches_requested_partition(
+    spec: EndpointSpec, row: dict[str, Any], params: dict[str, Any]
+) -> None:
+    race_date_field = next(
+        field for field in spec.business_key_fields if field.name == "race_date"
+    )
+    present_dates = [alias for alias in race_date_field.aliases if alias in row]
+    if not present_dates:
+        raise KRAResponseError(
+            f"row partition race date is missing for {spec.endpoint_id}"
+        )
+    dates = {
+        _normalize_key_value(row[alias], race_date_field.kind)
+        for alias in present_dates
+    }
+    requested_month = str(params.get("rc_month", ""))
+    if (
+        len(dates) != 1
+        or not requested_month
+        or not dates.pop().startswith(requested_month)
+    ):
+        raise KRAResponseError(
+            f"row race date differs from requested month for {spec.endpoint_id}"
+        )
+    requested_meet = int(params["meet"])
+    present_meets = [alias for alias in ("meet", "meetCode") if alias in row]
+    if present_meets:
+        try:
+            meets = {int(str(row[alias]).strip()) for alias in present_meets}
+        except ValueError as exc:
+            raise KRAResponseError(
+                f"row meet is invalid for {spec.endpoint_id}"
+            ) from exc
+        if meets != {requested_meet}:
+            raise KRAResponseError(
+                f"row meet differs from requested meet for {spec.endpoint_id}"
+            )
+
+
 def collector_contract_hash(spec: EndpointSpec) -> str:
     return sha256_bytes(
         canonical_json(
@@ -171,6 +210,7 @@ class ManifestRecord:
 
 ENFORCED_GATES = [
     "all_pages_total_count_constant",
+    "rows_match_requested_partition",
     "business_key_unique_across_pages",
     "business_key_union_equals_total_count",
     "terminal_page_empty",
@@ -236,6 +276,9 @@ def completed_record_files_are_valid(
             ):
                 return False
             for row in envelope.rows:
+                assert_row_matches_requested_partition(
+                    spec, row, record.canonical_params_without_service_key
+                )
                 row_hash = sha256_bytes(canonical_json(row))
                 row_key = business_key_hash(spec, row)
                 if row_key in business_keys:
@@ -266,10 +309,15 @@ def completed_record_files_are_valid(
         normalized_content = gzip.decompress(normalized_path.read_bytes())
         if sha256_bytes(normalized_content) != record.normalized_content_sha256:
             return False
-        normalized_hashes = {
-            sha256_bytes(canonical_json(json.loads(line)))
+        normalized_rows = [
+            json.loads(line)
             for line in normalized_content.decode("utf-8").splitlines()
             if line
+        ]
+        if len(normalized_rows) != total_count:
+            return False
+        normalized_hashes = {
+            sha256_bytes(canonical_json(row)) for row in normalized_rows
         }
         return normalized_hashes == raw_row_hashes
     except (
@@ -446,6 +494,7 @@ class Collector:
             ):
                 raise KRAResponseError("partial page count metadata differs")
             for row in envelope.rows:
+                assert_row_matches_requested_partition(spec, row, base_params)
                 row_hash = sha256_bytes(canonical_json(row))
                 row_key = business_key_hash(spec, row)
                 if row_key in seen_business_keys:
@@ -593,6 +642,7 @@ class Collector:
                 response_format=envelope.response_format,
             )
             for row in envelope.rows:
+                assert_row_matches_requested_partition(spec, row, base_params)
                 row_hash = sha256_bytes(canonical_json(row))
                 row_key = business_key_hash(spec, row)
                 if row_key in seen_business_keys:

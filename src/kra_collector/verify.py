@@ -13,6 +13,7 @@ from .collect import (
     COLLECTOR_SCHEMA_VERSION,
     ENFORCED_GATES,
     UNRUN_PILOT_GATES,
+    assert_row_matches_requested_partition,
     business_key_hash,
     canonical_json,
     collector_contract_hash,
@@ -149,9 +150,14 @@ def main(argv: list[str] | None = None) -> int:
             for row in envelope.rows:
                 row_hash = sha256_bytes(canonical_json(row))
                 try:
+                    assert_row_matches_requested_partition(
+                        ENDPOINTS[key[0]], row, params
+                    )
                     row_key = business_key_hash(ENDPOINTS[key[0]], row)
                 except KRAResponseError:
-                    errors.append(f"business_key_invalid:{key}:{page['page_no']}")
+                    errors.append(
+                        f"row_partition_or_business_key_invalid:{key}:{page['page_no']}"
+                    )
                     continue
                 if row_key in business_keys:
                     errors.append(f"duplicate_business_key:{key}:{page['page_no']}")
@@ -196,10 +202,15 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if sha256_bytes(normalized_content) != record["normalized_content_sha256"]:
             errors.append(f"normalized_hash_mismatch:{key}")
-        normalized_hashes = {
-            sha256_bytes(canonical_json(json.loads(line)))
+        normalized_rows = [
+            json.loads(line)
             for line in normalized_content.decode("utf-8").splitlines()
             if line
+        ]
+        if len(normalized_rows) != total_count:
+            errors.append(f"normalized_row_count_mismatch:{key}")
+        normalized_hashes = {
+            sha256_bytes(canonical_json(row)) for row in normalized_rows
         }
         if normalized_hashes != raw_row_hashes:
             errors.append(f"normalized_raw_set_mismatch:{key}")

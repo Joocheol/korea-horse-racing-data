@@ -2,6 +2,7 @@
   "schema_version": "2",
   "core_transport": [
     "all_pages_total_count_constant",
+    "rows_match_requested_partition",
     "business_key_unique_across_pages",
     "business_key_union_equals_total_count",
     "terminal_page_empty",

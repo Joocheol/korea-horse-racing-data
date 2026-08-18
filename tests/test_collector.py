@@ -252,6 +252,89 @@ class TwoPageClient:
         return content, "application/json", envelope
 
 
+class WrongPartitionClient(TwoPageClient):
+    def get(self, path: str, params: dict[str, object]):
+        content, content_type, envelope = super().get(path, params)
+        wrong_rows = [{**row, "rcDate": 20210601} for row in envelope.rows]
+        payload = json.loads(content)
+        payload["response"]["body"]["items"] = {"item": wrong_rows}
+        return (
+            json.dumps(payload).encode(),
+            content_type,
+            ParsedEnvelope(
+                wrong_rows,
+                envelope.total_count,
+                envelope.result_code,
+                envelope.result_message,
+                envelope.response_format,
+            ),
+        )
+
+
+def test_collector_rejects_rows_outside_requested_partition(tmp_path: Path) -> None:
+    collector = Collector(
+        WrongPartitionClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="wrong-partition",
+    )
+    with pytest.raises(KRAResponseError, match="requested month"):
+        collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
+def test_verifier_rejects_internally_consistent_wrong_partition(tmp_path: Path) -> None:
+    collector = Collector(
+        TwoPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="wrong-partition-verify",
+    )
+    record = collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    manifest = json.loads(collector.manifest_path.read_text())
+    changed_rows: list[dict[str, object]] = []
+    for page in manifest["pages"]:
+        raw_path = tmp_path / page["raw_path"]
+        payload = json.loads(raw_path.read_text())
+        rows = payload["response"]["body"]["items"]["item"]
+        for row in rows:
+            row["rcDate"] = 20210615
+        changed_rows.extend(rows)
+        content = json.dumps(payload).encode()
+        raw_path.write_bytes(content)
+        page["raw_sha256"] = sha256_bytes(content)
+    manifest["normalized_content_sha256"] = write_deterministic_jsonl_gz(
+        tmp_path / record.normalized_path, changed_rows
+    )
+    collector.manifest_path.write_text(json.dumps(manifest) + "\n")
+
+    assert (
+        verify_main(
+            [
+                "--root",
+                str(tmp_path),
+                "--snapshot-id",
+                "wrong-partition-verify",
+                "--start",
+                "2021-05",
+                "--end",
+                "2021-05",
+                "--meets",
+                "1",
+                "--endpoints",
+                "api28",
+            ]
+        )
+        == 2
+    )
+    report = json.loads(
+        (tmp_path / "reports" / "quality-wrong-partition-verify.json").read_text()
+    )
+    assert any(
+        error.startswith("row_partition_or_business_key_invalid")
+        for error in report["errors"]
+    )
+
+
 def api28_row(selection: int, odds: str) -> dict[str, object]:
     return {
         "rcDate": 20210515,
@@ -1072,6 +1155,7 @@ def test_machine_readable_gate_registry_matches_collector() -> None:
     registry = json.loads((root / "config" / "verification-gates.json").read_text())
     expected_core = [
         "all_pages_total_count_constant",
+        "rows_match_requested_partition",
         "business_key_unique_across_pages",
         "business_key_union_equals_total_count",
         "terminal_page_empty",
@@ -1221,6 +1305,7 @@ def test_collection_workflow_has_encrypted_durable_quarantine() -> None:
     assert "if: always()" in workflow
     assert "actions/upload-artifact" not in workflow
     assert "quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg" in workflow
+    assert "quota-${quota_date}-" in workflow
     assert "group: collect-kra-data-go-kr-key" in workflow
     assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg" in workflow
     assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json" in workflow

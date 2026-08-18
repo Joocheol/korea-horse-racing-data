@@ -117,13 +117,13 @@ jobs:
                   'map(select(.name == $name)) | last | .id // empty' \
                   /tmp/kra-assets.json
               )"
-              candidate_outcome="interrupted"
+              candidate_outcome="unknown"
               if [ -n "$scan_asset_id" ]; then
                 gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${scan_asset_id}" \
                   -H 'Accept: application/octet-stream' > /tmp/kra-scan.json
-                candidate_outcome="$(jq -r '.outcome // "interrupted"' /tmp/kra-scan.json)"
+                candidate_outcome="$(jq -r '.outcome // "unknown"' /tmp/kra-scan.json)"
               fi
-              if [ "$candidate_outcome" != "failure" ]; then
+              if [ "$candidate_outcome" = "success" ] || [ "$candidate_outcome" = "interrupted" ]; then
                 asset_id="$candidate_id"
                 asset_name="$candidate_name"
                 scan_outcome="$candidate_outcome"
@@ -165,7 +165,7 @@ jobs:
           if [ -n "$release_id" ]; then
             asset_id="$(
               gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
-                --jq "map(select(.name | startswith(\"quota-${quota_date}.\"))) | sort_by(.created_at) | last | .id // empty"
+                --jq "map(select(.name | startswith(\"quota-${quota_date}-\"))) | sort_by(.created_at) | last | .id // empty"
             )"
           fi
           if [ -n "$asset_id" ]; then
@@ -176,7 +176,11 @@ jobs:
             mkdir -p "$(dirname "$KRA_QUOTA_LEDGER")"
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase-file /tmp/kra-archive-passphrase \
-              --output "$KRA_QUOTA_LEDGER" --decrypt /tmp/kra-quota.jsonl.gpg
+              --output /tmp/kra-restored-quota.jsonl --decrypt /tmp/kra-quota.jsonl.gpg
+            touch "$KRA_QUOTA_LEDGER"
+            sort -u "$KRA_QUOTA_LEDGER" /tmp/kra-restored-quota.jsonl \
+              > /tmp/kra-merged-quota.jsonl
+            mv /tmp/kra-merged-quota.jsonl "$KRA_QUOTA_LEDGER"
             echo "restored_quota_asset_id=$asset_id"
           else
             echo "no_shared_quota_ledger=true"
