@@ -17,7 +17,7 @@ v1은 **2020-01-01~2021-12-31**의 KRA 경주를 처음부터 다시 수집해 �
 - 실제 시행 여부와 근거
 - 국내 승식별 매출 존재 여부
 - 승식별 전체 조합격자 존재 여부
-- 격자 값의 의미론: `unverified_snapshot`, `prediction_snapshot`, `final_snapshot`
+- 격자 값의 의미론: `unknown`, `prediction`, `final`
 
 경주가 시행됐으나 국내 발매가 없었던 경우는 결측이나 수집 실패가 아니다.
 
@@ -71,7 +71,8 @@ API28~30의 전체격자성은 `docs/API_FINDINGS.md`의 실측으로 검증됐�
 `PredictionRate`만으로 확정/예상을 단정하지 않는다. 조종 수집에서 같은 경주의
 적중조합을 API179·API214 및 경로 확인 뒤 API301의 확정배당과 비교하고 응답의 시각·확정 플래그를
 기록한 뒤 `odds_semantics`를 확정한다. 의미론이 다르면 수치 충돌이 아니라 별도
-측정치로 보존한다. 충돌키는 `(경주키, 승식, 조합, 필드, 자료원, 시점)`이다.
+측정치로 보존한다. 충돌키는 `(경주키, 승식, 조합, 필드, 자료원,
+source_observed_at)`이다.
 
 ### 2.2 부가자료
 
@@ -93,12 +94,14 @@ API28~30의 전체격자성은 `docs/API_FINDINGS.md`의 실측으로 검증됐�
 ```yaml
 service: API30_1
 operation: triplePredictionRateInfo_1
-query_grain: month
+supported_grains: [month, date, race]
+collection_grain: month
 required_params: [meet, rc_month, pool, pageNo, numOfRows, _type]
 optional_params: [rc_date, rc_no]
 response_root: response.body.items.item
 success_codes: ["00", "0000"]
-pagination: {page: pageNo, size: numOfRows, total: totalCount, tested_size: 100000}
+pagination: {page: pageNo, size: numOfRows, total: totalCount, tested_size: 100000, page_size: 100000}
+expected_pages: ceil(totalCount / page_size)
 response_format: json
 pool_param: required
 market_field: pool
@@ -146,11 +149,26 @@ API72와 공식 공고는 배당 정본이 아니라 API 결측을 탐지하기 
 |---|---|---|
 | 시행상태 | `(rc_date, meet, rc_no)` | `scheduled`, `not_held`, `held`, `evidence_insufficient` |
 | 시장상태 | `(race_key, pool)` | `no_domestic_market`, `market_complete`, `api_incomplete`, `evidence_insufficient` |
-| 자료충돌 | `(race_key, pool, combination, field, source, snapshot)` | `has_source_conflict` + 상세 레코드 |
+| 자료충돌 | `(race_key, pool, combination, field, source, source_observed_at)` | `has_source_conflict` + 상세 레코드 |
 | 요청상태 | `(snapshot_id, endpoint, params, page)` | `success`, `retryable`, `unresolved_transport` |
 
 자료충돌과 요청오류는 시행·시장상태와 동시에 존재할 수 있다. 수치 비교 허용오차와
 반올림 규칙은 필드별로 `config/comparison-rules.yml`에 버전 고정한다.
+
+시행상태는 경주 grain의 다음 evidence ladder로 판정한다. 날짜 단위 신호는 경주
+후보를 찾는 집계 보조일 뿐 시행상태를 직접 결정하지 않는다.
+
+| 코드 | 경주 grain 증거 | 시행상태 |
+|---|---|---|
+| `R1_RESULT_ORDER` | API214/API4의 해당 `race_key` 착순 또는 공식 결과 존재 | `held` |
+| `R2_OFFICIAL_HELD_NOTICE` | 공식 공고가 시행을 명시 | `held` |
+| `R3_OFFICIAL_CANCEL_NOTICE` | 공식 공고가 취소를 명시하고 착순 없음 | `not_held` |
+| `R4_PRESTART_CANCEL` | 발주 전 취소 플래그와 착순 없음 | `not_held` |
+| `R5_POST_BET_CANCEL_REFUND` | `amt>0`, 착순 없음, 공식 취소·반환 근거 | `not_held` + `betting_opened_then_cancelled=true` |
+| `R6_CONFLICT_OR_ABSENCE` | 위 조건이 성립하지 않거나 증거 충돌 | `evidence_insufficient` |
+
+R5는 시행되지 않은 경주로 분모에서 제외하되, 이미 시장이 열렸던 사실·매출·반환은
+별도 시장 예외 레코드로 보존한다. 취소/제외 필드가 없는 경우 추정하지 않고 R6다.
 
 시장 evidence는 다음 코드로 저장한다.
 
@@ -167,6 +185,11 @@ API72와 공식 공고는 배당 정본이 아니라 API 결측을 탐지하기 
 누락을 배제할 수 없어 `evidence_insufficient`다. E4·E5는 시장이 존재한 것이므로
 무발매가 아니다. preflight는 E6 경주 수와 전체 시행경주 대비 비율을 연도·경주장별로
 보고한다.
+
+E6는 조건부 사이트 조회의 시행·발매 분모 게이트를 자동 생성한다. 2020·2021년
+공식 무관중·발매중지 기간을 공고에서 먼저 열거하고 E6와 결합한다. E1을 찾은 E6는
+`no_domestic_market`, 찾지 못한 E6는 `evidence_insufficient`로 남으며 분석표본에서는
+기본 제외한다.
 HTTP 2xx, 0행, API179 행 부재만으로 무발매를 선언하지 않는다. 판정 결과에는
 evidence 코드와 규칙 버전을 함께 저장한다.
 
@@ -181,9 +204,9 @@ evidence 코드와 규칙 버전을 함께 저장한다.
 4. 등록·출전예정·발주·발매전취소·발매후제외·실격·낙마·중지를 별도 플래그로 둔다.
 5. API179로 승식별 매출행과 `amt`를 확인한다.
 6. 날짜별 `has_positive_turnover`, `has_result_order`, `has_entry_sheet`,
-   `listed_in_official_calendar`를 만든다. 양수 매출과 착순이 모두 있으면 요일과
-   무관하게 실제 경주다. 착순은 있으나 매출이 전부 없는 COVID 후보는 시행경주로
-   보존하고 E6로 시장상태를 따로 판정한다.
+   `has_all_expected_markets`, `listed_in_official_calendar`를 만든다. 양수 매출과
+   착순이 모두 있으면 요일과 무관하게 실제 경주다. 착순은 있으나 매출이 전부
+   없는 COVID 후보는 시행경주로 보존하고 E6로 시장상태를 따로 판정한다.
 7. 매출·착순이 모두 없거나 신호가 서로 모순되는 소규모 기록만
    `calendar_anomaly` 후보로 격리한다. 요일은 `weekday_flag` 참고값일 뿐 자동
    제외·격리 조건으로 사용하지 않는다.
@@ -193,8 +216,11 @@ evidence 코드와 규칙 버전을 함께 저장한다.
 실격·낙마·경주중지는 발주했다면 제외하지 않는다. 사용할 필드와 코드의 실제
 의미는 엔드포인트 레지스트리에 근거와 함께 고정한다.
 
-격리 레코드는 삭제하지 않고 원자료·네 신호·판정 근거·규칙 버전과 함께
-`quarantine/irregular-race-dates.parquet`에 보존한다. 분석표본에서는 기본 제외하되
+격리 레코드는 삭제하지 않고 원자료·다섯 신호·판정 근거·규칙 버전과 함께
+`quarantine/calendar-anomalies.parquet`에 보존한다. 2016년 7개 의심 개최일은
+매출·착순·출전표 0과 불완전 승식으로 시험 기록임이 3차 조사에서 확인됐다.
+2009-03-11·2009-04-01·2007-01-09는 같은 패턴이지만 직접 확인 전까지
+`suspected_test_record`로 둔다. 분석표본에서는 기본 제외하되
 추가 매출·착순·공식 일정 근거가 생기면 새 규칙 버전에서 재분류한다.
 
 ### 5.2 조종 수집
@@ -255,7 +281,7 @@ support 완전성은 단일 페이지가 아니라 모든 페이지를 중복제
 ### 5.4 조합 support
 
 격자 행에는 승식·조합·배당·경주키가 있어야 하고 조합 안에 같은 마번이 반복되면
-안 된다. 이론 support의 기준 집합은 각 경주·snapshot 시점의 취소/제외 플래그로
+안 된다. 이론 support의 기준 집합은 각 경주·`odds_observed_at` 시점의 취소/제외 플래그로
 계산하는 함수다. 조종에서 확인한 API 격자 생성 규칙과 함수 버전을 함께 저장한다.
 
 | 승식 | 이론 support |
@@ -271,10 +297,11 @@ support 완전성은 단일 페이지가 아니라 모든 페이지를 중복제
 `present_with_refund`, `absent` 중 무엇인지 `config/support-rules.yml`에 조종 종료
 전에 확정한다. 연승 지급두수, 복연승 제공과 같은 field-size regime도 경주별
 변수로 둔다.
-0표 조합이 행으로 제공되는지 조종에서 확인하기 전까지 완전성 불변식은
-`observed_support ⊆ theoretical_support`만 강제한다. 확인 뒤
-`(race, pool, snapshot)`별로 `=` 또는 `⊆`를 판정하며, 미상 불일치는 결측이 아니라
-규칙 미확인으로 남긴다.
+API28·29·30의 기본 완전성 불변식은
+`observed_support = theoretical_support`다. 2026-08-18 실측은 상한 셀을 포함한
+전체 조합행이 반환됨을 확인했으므로 shortfall은 수집 결함으로 조사한다. `⊆`는
+발매후제외 등 조종에서 근거가 확인된 `(race, pool, snapshot_id)` 예외에만 허용하고,
+예외코드·근거·누락조합을 품질보고서에 기록한다.
 
 ### 5.5 매출·환급률·검열·충돌 검증
 
@@ -286,8 +313,11 @@ support 완전성은 단일 페이지가 아니라 모든 페이지를 중복제
   의미를 확정한다.
 - 배당에서 마권수를 역산할 때 모든 값은 절사·반올림·최저배당 때문에 구간추정으로
   취급한다. `9999.9`는 실제값이 아닌 상한 sentinel이며 식별 가능한 경계만 보고한다.
-- `(race, pool, snapshot)`별 `censored_count`와 `censored_fraction`을 정규화 표와
+- `(race, pool, snapshot_id)`별 `censored_count`와 `censored_fraction`을 정규화 표와
   품질보고서에 내고, `analysis-rules`가 검열 처리방법을 반드시 선언하게 한다.
+- `(race, pool)`별 오버라운드 \(\sum(1/O)\)를 적용 환급률과 대조한다. `9999.9`
+  검열셀 때문에 정확한 등식이 불가능한 경우 검열이 만드는 상·하한을 계산한 bounded
+  check로 보고하고 범위를 벗어날 때만 실패시킨다.
 
 환급률 메타데이터는 `(승식, 적용시작일, 적용종료일, 값, 공식 근거문서 식별자,
 확인일, 반환 차감 전후 기준, 절사단위, 최저배당)`로 저장한다. 역산 검사는 계획
@@ -322,9 +352,30 @@ support 완전성은 단일 페이지가 아니라 모든 페이지를 중복제
 보존하고 공개하지 않는다. 확인 뒤 허용된 원문만 공개하며, 그렇지 않으면 검증된
 사실값·provenance·추출 규칙만 유지하고 원문은 보존기간 종료 뒤 폐기한다.
 
+### 5.7 수집기 필수 요구사항
+
+수집 구현을 시작하기 전에 `docs/API_FINDINGS.md` 10절의 체크리스트를 다음의
+실행 가능한 테스트·완료 게이트로 옮긴다.
+
+1. 경주별 행 수가 승식별 이론 조합 수 \(n\), \(n(n-1)\),
+   \(\binom{n}{2}\), \(\binom{n}{3}\), \(n(n-1)(n-2)\)와 일치함
+2. 출주두수를 API26의 `dusu`와 취소마 정보로 독립 산출함
+3. 복승을 API5와 API29 양쪽에서 받아 셀 단위 대조함
+4. 승식별 오버라운드 \(\sum(1/O)\)가 적용 환급률과 정합함
+5. 매출액에서 역산한 마권 수의 정수·절사 허용구간 검사를 통과함
+6. 개최일을 매출액·착순 존재로 판별하고 요일을 판정식에 사용하지 않음
+7. 일부 승식만 존재하는 날짜에 승식 불완전 플래그를 남김
+8. 걸러낸 날짜를 삭제하지 않고 격리표에 보존함
+9. 월×경주장×endpoint×pool `totalCount`를 매니페스트에 저장해 재수집 때 대조함
+10. 모든 보존 원응답의 바이트와 SHA-256이 일치함
+
+각 항목은 테스트 ID, 입력 fixture, 합격조건과 실패 시 상태를 가져야 하며 10개가
+모두 구현되기 전에는 조종 수집을 본수집으로 승격하지 않는다.
+
 ## 6. 호출예산, 오류처리와 재시작
 
-- 실측 한도: API179 일일 3,000회, 나머지 필수 API는 각각 일일 10,000회
+- 개발계정 실측 한도: API179 일일 3,000회, 나머지 필수 API는 각각 일일 10,000회
+- 운영단계 상향은 심의승인이며 자동 전환으로 가정하지 않음
 - endpoint별 운영 상한은 공식 한도의 5/6이며 나머지 1/6을 재시도·검증에 유보
 - 최대 동시 요청 2개
 - 성공 원응답 저장 뒤에만 ledger 완료 처리
@@ -352,6 +403,11 @@ C_e = C_{calendar,e}+\sum_{g\in grain(e)}\sum_{p\in pools(e)}P_{e,g,p}
 보고서로 만들기 전에는 본수집을 시작하지 않는다. 전 기간 재수집은 v1 예산에
 포함하지 않는다.
 
+preflight에는 endpoint별 계정 tier, 현재 승인상태, 운영단계 심의 예상 lead time을
+포함한다. 상향승인이 일정 전에 나오지 않으면 개발계정 한도를 넘기지 않고
+`ceil(C_e / operating_cap_e)`만큼 경과일을 늘린다. 승인 미획득을 실패나 무발매로
+분류하지 않는다.
+
 저장된 요청의 재개키는 `(snapshot_id, endpoint_id,
 canonical_params_without_serviceKey, pageNo)`다. 같은 키의 완료 ledger가 있고 저장된
 원문이 존재하며 그 바이트 해시가 ledger 값과 일치할 때만 네트워크 호출을
@@ -375,6 +431,8 @@ tests/                  단위·속성·회귀테스트와 비밀누출 테스�
 plans/                  동결 계획
 manifests/              파일·행·호출·개별 원응답 체크섬 목록
 reports/                품질·누락·충돌·preflight 보고서
+evidence/               실측·판정근거 레지스트리와 reproduce_required 상태
+quarantine/             삭제하지 않는 시험·이상 개최일 정규화 표
 ```
 
 ### 7.2 공개 Release 자산
@@ -386,6 +444,8 @@ manifest-YYYY-vN.json             요청키·개별 원응답 SHA-256·행·스�
 SHA256SUMS                         배포파일 전송 무결성용 해시
 DATA-LICENSE-YYYY-vN.txt          해당 파티션의 적용 이용조건·출처
 analysis-rules-YYYY-vN.yml        분석표본 포함·제외 규칙
+evidence-YYYY-vN.parquet          상태·실측 evidence 레지스트리
+quarantine-YYYY-vN.parquet        시험·이상 개최일과 제외 근거
 ```
 
 정본 무결성은 매니페스트의 `request_key → raw byte SHA-256`이다. 아카이브 해시는
@@ -397,6 +457,12 @@ zstd 버전·레벨과 생성 명령을 매니페스트에 기록한다.
 `collection_method`와 `completeness_audit_status`를 기록한다. 2020·2021 API 수집은
 `openapi_monthly`; 기존 2019·2022 아카이브 비교는 날짜단위 누락감사가 끝나지 않은
 `legacy_archive_partially_audited`로 표시해 경계 비교의 정답으로 사용하지 않는다.
+
+evidence와 quarantine은 라이선스가 확인된 사실값·provenance만 공개 Release에
+포함한다. 재배포 권리가 없는 웹 원문은 연결하지 않고 비공개 격리 규칙을 따른다.
+2026-08-18 사전 실측 중 당시 원응답 보존이 문서로 확인되지 않은 항목은 임의 해시를
+채우지 않고 `reproduce_required=true`로 등록하며, 조종에서 재호출한 원응답은
+`rerun_at`과 새 해시를 별도로 기록한 뒤 레지스트리를 동결한다.
 
 원응답은 append-only다. 정정 때 새 스냅샷을 추가하고 이전 판을 삭제하지 않으며,
 릴리스 매니페스트에 `supersedes` 관계와 재수집 사유를 둔다. 단, 공개 권리가 없는
@@ -424,11 +490,13 @@ evidence만으로 다시 계산하고 불충분하면 `evidence_insufficient`로
 확인일과 카탈로그 URL을 기록한다. KRA 웹 원문은 별도 허용이 확인되기 전 공개
 Release에서 제외한다.
 
-공개 등급은 두 가지다. 독립적인 일정 분모가 확인된 파티션만 `final`이다.
-API72·API26·공식 공고 어느 것으로도 독립 분모를 만들지 못한 API-only 파티션은
-`provisional_api_only`로만 공개하며, 매니페스트와 DATA-LICENSE 첫머리에 “개최일
-통누락을 독립적으로 탐지할 수 없음”을 표시한다. 이후 분모가 확인되면 새 final
-릴리스가 provisional을 `supersedes`한다.
+공개 등급은 두 가지다. 같은 OpenAPI 게시 경로 밖의 공식 시행계획·변경·취소·발매
+중지 공고로 일정 분모를 확인한 파티션만 `final`이다. API72와 API26은 효율적인
+열거원이나 같은 OpenAPI 계열이므로 개최일 통누락에 대한 독립 분모로 인정하지
+않는다. API72·API26만 확보한 파티션은 `provisional_api_only`로만 공개하며,
+매니페스트와 DATA-LICENSE 첫머리에 “개최일 통누락을 독립적으로 탐지할 수 없음”을
+표시한다. 이후 외부 공고 분모가 확인되면 새 final 릴리스가 provisional을
+`supersedes`한다. API72 경로가 끝내 미확인이어도 API26+공고 경로로 수집은 진행한다.
 
 bulk raw 재배포 권리만 미확인이고 normalized facts 재배포는 확인된 경우에는
 정규화 표·매니페스트·보고서만 공개할 수 있다. 필수 source의 normalized facts
@@ -458,6 +526,8 @@ bulk raw 재배포 권리만 미확인이고 normalized facts 재배포는 확�
 14. 수집 모집단과 분석 표본의 포함·제외 규칙이 별도 산출물로 존재함
 15. Claude Opus 5의 필수 지적이 해결되거나 저자결정으로 명시됨
 16. 월×경주장×endpoint×pool `totalCount`와 파티션 수집방법·감사상태가 매니페스트에 있음
+17. API5와 API29 복승 셀의 조합·배당이 허용오차 안에서 일치하거나 충돌표에 있음
+18. 승식별 오버라운드 bounded check가 적용 환급률 메타데이터와 정합함
 
 ## 10. Claude 독립검토
 

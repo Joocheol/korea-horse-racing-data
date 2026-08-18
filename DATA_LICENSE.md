@@ -31,7 +31,7 @@ behavioral evidence must be read from `docs/API_FINDINGS.md`, not inferred from 
 | `API214_1/RaceDetailResult_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
 | `API4_3/raceResult_3` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
 | `API72_2/racePlan_2` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked; path unverified |
-| `API301/Dividend_rate_total` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
+| `API301/Dividend_rate_total` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked; path unverified |
 
 An investigated catalog page checked on 2026-08-18 described its portal use scope as unrestricted.
 That field alone does not establish a Public Nuri type, attribution duty, or permission for bulk
@@ -51,6 +51,9 @@ The release-specific `DATA-LICENSE-YYYY-vN.txt` states the most restrictive comp
 apply to the partition. It does not imply ownership of KRA source facts or waive source conditions.
 It also declares `final` or `provisional_api_only`. A provisional release states prominently that
 whole-meeting-day omission could not be checked against an independent schedule denominator.
+Only an official schedule/change/cancellation/sales-suspension notice published outside the same
+OpenAPI delivery path qualifies as the independent denominator for `final`; API26 or API72 alone
+does not.
 
 ## Exclusions
 
