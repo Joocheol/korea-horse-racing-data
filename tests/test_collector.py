@@ -288,6 +288,7 @@ class WrongPoolClient:
         rows = (
             [
                 {
+                    "meet": 1,
                     "rcDate": 20210515,
                     "rcNo": 1,
                     "pool": "TRI",
@@ -379,6 +380,7 @@ def test_verifier_rejects_internally_consistent_wrong_partition(tmp_path: Path) 
 
 def api28_row(selection: int, odds: str) -> dict[str, object]:
     return {
+        "meet": 1,
         "rcDate": 20210515,
         "rcNo": 1,
         "pool": "WIN",
@@ -520,6 +522,54 @@ def test_nonempty_terminal_probe_fails_closed(tmp_path: Path) -> None:
     )
     with pytest.raises(KRAResponseError, match="terminal page is not empty"):
         collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
+class ZeroTotalTerminalProbeClient(TwoPageClient):
+    def get(self, path: str, params: dict[str, object]):
+        page = int(params["pageNo"])
+        if page != 3:
+            return super().get(path, params)
+        payload = {
+            "response": {
+                "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+                "body": {"items": {}, "totalCount": 0},
+            }
+        }
+        content = json.dumps(payload).encode()
+        return (
+            content,
+            "application/json",
+            ParsedEnvelope([], 0, "00", "NORMAL", "json"),
+        )
+
+
+def test_terminal_probe_accepts_frozen_zero_total_count_policy(tmp_path: Path) -> None:
+    collector = Collector(
+        ZeroTotalTerminalProbeClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="zero-probe-total",
+    )
+    collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    assert (
+        verify_main(
+            [
+                "--root",
+                str(tmp_path),
+                "--snapshot-id",
+                "zero-probe-total",
+                "--start",
+                "2021-05",
+                "--end",
+                "2021-05",
+                "--meets",
+                "1",
+                "--endpoints",
+                "api28",
+            ]
+        )
+        == 0
+    )
 
 
 class ServerCapClient(TwoPageClient):
@@ -1096,7 +1146,11 @@ class FakePreflightClient:
 
     def get(self, path: str, params: dict[str, object]):
         content = json.dumps({"probe": path, "params": params}, sort_keys=True).encode()
-        base = {"rcDate": f"{params['rc_month']}04", "rcNo": 1}
+        base = {
+            "meet": params["meet"],
+            "rcDate": f"{params['rc_month']}04",
+            "rcNo": 1,
+        }
         if path.startswith("API28"):
             row = {**base, "pool": "WIN", "chulNo": 1}
         elif path.startswith("API29"):

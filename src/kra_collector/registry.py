@@ -24,6 +24,7 @@ class EndpointSpec:
     optional_params: tuple[str, ...]
     response_root: str
     pagination: str
+    terminal_probe_total_count: str
     pool_param: str
     pools: tuple[str | None, ...]
     business_key_fields: tuple[BusinessKeyField, ...]
@@ -53,6 +54,7 @@ def _load_registry() -> dict[str, EndpointSpec]:
             optional_params=tuple(item["optional_params"]),
             response_root=item["response_root"],
             pagination=item["pagination"],
+            terminal_probe_total_count=item["terminal_probe_total_count"],
             pool_param=item["pool_param"],
             pools=tuple(item["market_codes"]),
             business_key_fields=tuple(
@@ -64,11 +66,17 @@ def _load_registry() -> dict[str, EndpointSpec]:
                 for field in item["business_key_fields"]
             ),
         )
-        if spec.response_format != "json" or spec.pool_param not in {
-            "required",
-            "optional",
-            "prohibited",
-        }:
+        if (
+            spec.response_format != "json"
+            or spec.terminal_probe_total_count
+            not in {"echoed", "zero", "echoed_or_zero"}
+            or spec.pool_param
+            not in {
+                "required",
+                "optional",
+                "prohibited",
+            }
+        ):
             raise RuntimeError(f"invalid endpoint registry entry: {endpoint_id}")
         specs[endpoint_id] = spec
     return specs

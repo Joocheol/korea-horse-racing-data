@@ -18,6 +18,7 @@ from .collect import (
     canonical_json,
     collector_contract_hash,
     request_id,
+    terminal_probe_total_count_is_valid,
     write_atomic,
 )
 from .registry import ENDPOINTS
@@ -208,7 +209,9 @@ def main(argv: list[str] | None = None) -> int:
                 except KRAResponseError:
                     errors.append(f"terminal_probe_envelope_invalid:{key}")
                     continue
-                if probe_envelope.rows or probe_envelope.total_count != total_count:
+                if probe_envelope.rows or not terminal_probe_total_count_is_valid(
+                    ENDPOINTS[key[0]], probe_envelope.total_count, total_count
+                ):
                     errors.append(f"terminal_probe_not_empty:{key}")
 
         normalized_path = root / record["normalized_path"]

@@ -18,6 +18,7 @@
       "optional_params": [],
       "response_root": "response.body.items.item",
       "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
       "pool_param": "prohibited",
       "market_codes": [null],
       "business_key_fields": [
@@ -37,6 +38,7 @@
       "optional_params": [],
       "response_root": "response.body.items.item",
       "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
       "pool_param": "prohibited",
       "market_codes": [null],
       "business_key_fields": [
@@ -57,6 +59,7 @@
       "optional_params": [],
       "response_root": "response.body.items.item",
       "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
       "pool_param": "required",
       "market_codes": ["TLA", "TRI"],
       "business_key_fields": [
@@ -78,6 +81,7 @@
       "optional_params": [],
       "response_root": "response.body.items.item",
       "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
       "pool_param": "prohibited",
       "market_codes": [null],
       "business_key_fields": [

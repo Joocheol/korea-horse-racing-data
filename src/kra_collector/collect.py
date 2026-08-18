@@ -118,17 +118,16 @@ def assert_row_matches_requested_partition(
         )
     requested_meet = int(params["meet"])
     present_meets = [alias for alias in ("meet", "meetCode") if alias in row]
-    if present_meets:
-        try:
-            meets = {int(str(row[alias]).strip()) for alias in present_meets}
-        except ValueError as exc:
-            raise KRAResponseError(
-                f"row meet is invalid for {spec.endpoint_id}"
-            ) from exc
-        if meets != {requested_meet}:
-            raise KRAResponseError(
-                f"row meet differs from requested meet for {spec.endpoint_id}"
-            )
+    if not present_meets:
+        raise KRAResponseError(f"row meet is missing for {spec.endpoint_id}")
+    try:
+        meets = {int(str(row[alias]).strip()) for alias in present_meets}
+    except ValueError as exc:
+        raise KRAResponseError(f"row meet is invalid for {spec.endpoint_id}") from exc
+    if meets != {requested_meet}:
+        raise KRAResponseError(
+            f"row meet differs from requested meet for {spec.endpoint_id}"
+        )
     if "pool" in params:
         market_field = next(
             field for field in spec.business_key_fields if field.name == "market"
@@ -143,6 +142,17 @@ def assert_row_matches_requested_partition(
             raise KRAResponseError(
                 f"row pool differs from requested pool for {spec.endpoint_id}"
             )
+
+
+def terminal_probe_total_count_is_valid(
+    spec: EndpointSpec, observed: int, expected: int
+) -> bool:
+    policy = spec.terminal_probe_total_count
+    if policy == "echoed":
+        return observed == expected
+    if policy == "zero":
+        return observed == 0
+    return observed in {0, expected}
 
 
 def collector_contract_hash(spec: EndpointSpec) -> str:
@@ -331,7 +341,9 @@ def completed_record_files_are_valid(
         probe_envelope = parse_envelope(
             probe_content, probe.get("content_type", ""), spec.response_format
         )
-        if probe_envelope.rows or probe_envelope.total_count != total_count:
+        if probe_envelope.rows or not terminal_probe_total_count_is_valid(
+            spec, probe_envelope.total_count, total_count
+        ):
             return False
 
         normalized_path = root / record.normalized_path
@@ -595,7 +607,9 @@ class Collector:
             if sha256_bytes(content) != page.raw_sha256:
                 raise KRAResponseError("partial terminal probe hash differs")
             envelope = parse_envelope(content, page.content_type, spec.response_format)
-            if envelope.rows or envelope.total_count != expected_total:
+            if envelope.rows or not terminal_probe_total_count_is_valid(
+                spec, envelope.total_count, expected_total
+            ):
                 raise KRAResponseError("partial terminal probe is not empty")
             if len(rows) != expected_total:
                 raise KRAResponseError(
@@ -763,7 +777,9 @@ class Collector:
                 raise KRAResponseError(
                     f"terminal response violates endpoint registry for {spec.endpoint_id}"
                 )
-            if probe_envelope.total_count != expected_total:
+            if not terminal_probe_total_count_is_valid(
+                spec, probe_envelope.total_count, expected_total
+            ):
                 raise KRAResponseError(
                     f"terminal probe totalCount changed for {spec.endpoint_id}: "
                     f"{expected_total} -> {probe_envelope.total_count}"
