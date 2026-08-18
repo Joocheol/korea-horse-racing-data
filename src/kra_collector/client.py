@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -15,7 +14,15 @@ import requests
 BASE_URL = "https://apis.data.go.kr/B551015"
 SUCCESS_CODES = {"00", "0000", "NORMAL_CODE", "NORMAL SERVICE."}
 RETRYABLE_HTTP = {429, 500, 502, 503, 504}
-ENCODED_TOKEN = re.compile(r"%(?:25|2B|2F|3D)", re.IGNORECASE)
+PROBE_PATH = "API5/quinellaOddsInfo"
+PROBE_PARAMS = {
+    "meet": 1,
+    "rc_date": "20250308",
+    "rc_no": 1,
+    "pageNo": 1,
+    "numOfRows": 1,
+    "_type": "json",
+}
 
 
 class KRAError(RuntimeError):
@@ -30,29 +37,18 @@ class KRAResponseError(KRAError):
     """The response is not a successful KRA data envelope."""
 
 
-def normalize_service_key(value: str) -> tuple[str, str]:
-    """Return a decoding-form service key and the detected input form.
-
-    data.go.kr exposes the same key in decoding form (with +, / and =) and in
-    percent-encoded form. requests(params=...) must receive the decoding form;
-    otherwise each '%' becomes '%25'. Exactly one unquote is therefore applied
-    only when encoded reserved characters are detected.
-    """
-
+def service_key_candidates(value: str) -> list[tuple[str, str]]:
+    """Return candidates without guessing the key format from its appearance."""
     key = value.strip()
     if not key:
         raise KRAAuthenticationError("KRA service key is empty")
-
-    input_form = "encoding" if ENCODED_TOKEN.search(key) else "decoding"
-    normalized = unquote(key) if input_form == "encoding" else key
-
-    if ENCODED_TOKEN.search(normalized):
-        raise KRAAuthenticationError(
-            "service key remains percent-encoded after one normalization pass"
-        )
-    if any(ch.isspace() for ch in normalized):
+    if any(ch.isspace() for ch in key):
         raise KRAAuthenticationError("service key contains whitespace")
-    return normalized, input_form
+    candidates = [("as_provided", key)]
+    decoded = unquote(key)
+    if decoded != key:
+        candidates.append(("url_decoded_once", decoded))
+    return candidates
 
 
 def secret_fingerprints(key: str) -> tuple[bytes, ...]:
@@ -88,7 +84,8 @@ def _parse_json(payload: Any) -> ParsedEnvelope:
         header.get("resultMsg", root.get("resultMsg", ""))
     ).strip()
     if result_code and result_code not in SUCCESS_CODES:
-        if "SERVICE_KEY" in result_code.upper() or "AUTH" in result_code.upper():
+        error_text = f"{result_code} {result_message}".upper()
+        if "SERVICE_KEY" in error_text or "AUTH" in error_text:
             raise KRAAuthenticationError(f"KRA application error: {result_code}")
         raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
 
@@ -112,7 +109,8 @@ def _parse_xml(content: bytes) -> ParsedEnvelope:
     result_code = (root.findtext(".//resultCode") or "").strip()
     result_message = (root.findtext(".//resultMsg") or "").strip()
     if result_code and result_code not in SUCCESS_CODES:
-        if "SERVICE_KEY" in result_code.upper() or "AUTH" in result_code.upper():
+        error_text = f"{result_code} {result_message}".upper()
+        if "SERVICE_KEY" in error_text or "AUTH" in error_text:
             raise KRAAuthenticationError(f"KRA application error: {result_code}")
         raise KRAResponseError(f"KRA application error: {result_code} {result_message}")
     rows: list[dict[str, Any]] = []
@@ -146,13 +144,45 @@ class KRAClient:
         minimum_interval_seconds: float = 0.05,
         session: requests.Session | None = None,
     ) -> None:
-        self.service_key, self.input_key_form = normalize_service_key(service_key)
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max_attempts
         self.minimum_interval_seconds = minimum_interval_seconds
         self.session = session or requests.Session()
         self._last_request_at = 0.0
+        self.service_key, self.key_candidate = self._probe_service_key(service_key)
         self._secret_fingerprints = secret_fingerprints(self.service_key)
+
+    def _probe_service_key(self, raw_service_key: str) -> tuple[str, str]:
+        """Select the working key candidate by calling an approved API.
+
+        API5 is used because access to it was independently verified. This keeps
+        a credential-format failure distinct from a core endpoint subscription
+        failure. No candidate value is included in logs or exceptions.
+        """
+
+        failures: list[str] = []
+        for label, candidate in service_key_candidates(raw_service_key):
+            try:
+                response = self.session.get(
+                    f"{BASE_URL}/{PROBE_PATH}",
+                    params={"serviceKey": candidate, **PROBE_PARAMS},
+                    timeout=self.timeout_seconds,
+                    headers={"User-Agent": "korea-horse-racing-data/0.1 (+public research)"},
+                )
+                response.raise_for_status()
+                parse_envelope(response.content, response.headers.get("Content-Type", ""))
+                return candidate, label
+            except KRAAuthenticationError:
+                failures.append(f"{label}:authentication_rejected")
+            except (requests.RequestException, KRAResponseError) as exc:
+                raise KRAResponseError(
+                    "API5 credential probe could not complete because of a transport or response error"
+                ) from exc
+        tried = ", ".join(failures) or "no valid candidate"
+        raise KRAAuthenticationError(
+            "API5 rejected every service-key candidate "
+            f"({tried}); the secret is invalid or API5 is not approved"
+        )
 
     def _assert_body_has_no_secret(self, content: bytes) -> None:
         if any(token in content for token in self._secret_fingerprints):
@@ -197,4 +227,3 @@ class KRAClient:
 
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
-

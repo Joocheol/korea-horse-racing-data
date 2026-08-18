@@ -7,17 +7,28 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 
-from kra_collector.client import ParsedEnvelope, normalize_service_key, parse_envelope, sha256_bytes
+from kra_collector.client import (
+    KRAClient,
+    ParsedEnvelope,
+    parse_envelope,
+    service_key_candidates,
+    sha256_bytes,
+)
 from kra_collector.cli import month_range
 from kra_collector.collect import Collector, canonical_json, request_id, write_deterministic_jsonl_gz
 from kra_collector.registry import ENDPOINTS
 
 
-def test_encoding_key_is_decoded_exactly_once() -> None:
-    normalized, form = normalize_service_key("abc%2Bdef%2Fghi%3D")
-    assert normalized == "abc+def/ghi="
-    assert form == "encoding"
+def test_candidates_do_not_guess_from_key_shape() -> None:
+    assert service_key_candidates("abc+def/ghi=") == [("as_provided", "abc+def/ghi=")]
+    assert service_key_candidates("abc%2Bdef%2Fghi%3D") == [
+        ("as_provided", "abc%2Bdef%2Fghi%3D"),
+        ("url_decoded_once", "abc+def/ghi="),
+    ]
 
+
+def test_decoding_candidate_is_encoded_once_by_requests() -> None:
+    normalized = service_key_candidates("abc%2Bdef%2Fghi%3D")[1][1]
     prepared = requests.Request(
         "GET", "https://example.test", params={"serviceKey": normalized}
     ).prepare()
@@ -27,10 +38,49 @@ def test_encoding_key_is_decoded_exactly_once() -> None:
     assert parse_qs(urlsplit(prepared.url).query)["serviceKey"] == [normalized]
 
 
-def test_decoding_key_is_unchanged() -> None:
-    normalized, form = normalize_service_key("abc+def/ghi=")
-    assert normalized == "abc+def/ghi="
-    assert form == "decoding"
+class ProbeResponse:
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+        self.headers = {"Content-Type": "application/json"}
+        self.status_code = 200
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class ProbeSession:
+    def __init__(self) -> None:
+        self.candidates: list[str] = []
+
+    def get(self, url: str, *, params: dict[str, object], **kwargs: object) -> ProbeResponse:
+        candidate = str(params["serviceKey"])
+        self.candidates.append(candidate)
+        if "%2B" in candidate:
+            payload = {
+                "response": {
+                    "header": {
+                        "resultCode": "30",
+                        "resultMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+                    },
+                    "body": {},
+                }
+            }
+        else:
+            payload = {
+                "response": {
+                    "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+                    "body": {"items": {}, "totalCount": 0},
+                }
+            }
+        return ProbeResponse(json.dumps(payload).encode())
+
+
+def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:
+    session = ProbeSession()
+    client = KRAClient("abc%2Bdef%2Fghi%3D", session=session)  # type: ignore[arg-type]
+    assert client.key_candidate == "url_decoded_once"
+    assert client.service_key == "abc+def/ghi="
+    assert session.candidates == ["abc%2Bdef%2Fghi%3D", "abc+def/ghi="]
 
 
 def test_parse_json_envelope() -> None:

@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY || secrets.KRA_SERVICE_KEY || secrets.KRA_API_KEY || secrets.DATA_GO_KR_API_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -65,4 +65,3 @@ jobs:
           path: artifacts/kra-2020-2021-core
           if-no-files-found: warn
           retention-days: 30
-
