@@ -46,3 +46,18 @@ GitHub Actions Secret, 개인 저장경로, 이용조건이 별도로 확인되�
 
 이 저장소는 한국마사회가 운영하거나 보증하는 공식 저장소가 아닙니다.
 원자료 출처는 한국마사회와 공공데이터포털입니다.
+
+## 개발·검증
+
+Python 3.11 이상에서 외부 런타임 의존성과 설치 과정 없이 실행됩니다.
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python -m kra_data.preflight \
+  --start-year 2020 --end-year 2021 --max-units 20
+```
+
+실제 수집은 push로 시작되지 않습니다. GitHub Actions의 `Collect KRA pilot batch`를
+수동 실행하고 `kra-collection` Environment 승인을 받아야 합니다. 한 번에 처리할
+미완료 ledger 단위를 `max_units`로 제한합니다. 중단된 실행을 이어갈 때는 앞선
+Actions run ID를 `resume_run_id`로 지정해 raw 자료와 ledger를 복원합니다.

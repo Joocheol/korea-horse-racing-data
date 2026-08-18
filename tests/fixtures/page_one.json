@@ -1,0 +1,11 @@
+{
+  "response": {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {
+      "items": {"item": [{"meet": 1, "rcDate": 20200104, "rcNo": 1, "hrNo": 1}]},
+      "pageNo": 1,
+      "numOfRows": 1,
+      "totalCount": 1
+    }
+  }
+}
