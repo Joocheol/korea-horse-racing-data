@@ -1225,3 +1225,16 @@ def test_collection_workflow_has_encrypted_durable_quarantine() -> None:
     assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg" in workflow
     assert "${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json" in workflow
     assert "${ARTIFACT_NAME}-${SCAN_OUTCOME}" not in workflow
+
+
+def test_snapshot_pr_explicitly_dispatches_collector_ci() -> None:
+    root = Path(__file__).resolve().parents[1]
+    collector_workflow = (
+        root / ".github" / "workflows" / "collect-2020-2021.yml"
+    ).read_text()
+    ci_workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "gh workflow run ci.yml" in collector_workflow
+    assert "context='Collector CI'" in collector_workflow
+    assert "workflow_dispatch:" in ci_workflow
+    assert "TARGET_SHA: ${{ inputs.head_sha }}" in ci_workflow
+    assert "context: 'Collector CI'" in ci_workflow
