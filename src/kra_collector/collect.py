@@ -75,6 +75,23 @@ def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
     return business_key_observation(spec, row)[0]
 
 
+def _normalize_pool(value: Any) -> str:
+    text = str(value).strip().upper()
+    aliases = {
+        "삼복": "TLA",
+        "삼복승": "TLA",
+        "삼쌍": "TRI",
+        "삼쌍승": "TRI",
+        "복식": "QNL",
+        "복승": "QNL",
+        "쌍식": "EXA",
+        "쌍승": "EXA",
+        "복연": "QPL",
+        "복연승": "QPL",
+    }
+    return aliases.get(text, text)
+
+
 def assert_row_matches_requested_partition(
     spec: EndpointSpec, row: dict[str, Any], params: dict[str, Any]
 ) -> None:
@@ -111,6 +128,20 @@ def assert_row_matches_requested_partition(
         if meets != {requested_meet}:
             raise KRAResponseError(
                 f"row meet differs from requested meet for {spec.endpoint_id}"
+            )
+    if "pool" in params:
+        market_field = next(
+            field for field in spec.business_key_fields if field.name == "market"
+        )
+        present_pools = [alias for alias in market_field.aliases if alias in row]
+        if not present_pools:
+            raise KRAResponseError(
+                f"row pool is missing for requested pool on {spec.endpoint_id}"
+            )
+        row_pools = {_normalize_pool(row[alias]) for alias in present_pools}
+        if row_pools != {_normalize_pool(params["pool"])}:
+            raise KRAResponseError(
+                f"row pool differs from requested pool for {spec.endpoint_id}"
             )
 
 

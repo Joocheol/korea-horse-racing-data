@@ -282,6 +282,48 @@ def test_collector_rejects_rows_outside_requested_partition(tmp_path: Path) -> N
         collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
 
 
+class WrongPoolClient:
+    def get(self, path: str, params: dict[str, object]):
+        page = int(params["pageNo"])
+        rows = (
+            [
+                {
+                    "rcDate": 20210515,
+                    "rcNo": 1,
+                    "pool": "TRI",
+                    "chulNo": 1,
+                    "chulNo2": 2,
+                    "chulNo3": 3,
+                    "odds": "100.0",
+                }
+            ]
+            if page == 1
+            else []
+        )
+        payload = {
+            "response": {
+                "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+                "body": {"items": {"item": rows}, "totalCount": 1},
+            }
+        }
+        return (
+            json.dumps(payload).encode(),
+            "application/json",
+            ParsedEnvelope(rows, 1, "00", "NORMAL", "json"),
+        )
+
+
+def test_collector_rejects_rows_from_another_requested_pool(tmp_path: Path) -> None:
+    collector = Collector(
+        WrongPoolClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=100,
+        snapshot_id="wrong-pool",
+    )
+    with pytest.raises(KRAResponseError, match="requested pool"):
+        collector.collect_month(ENDPOINTS["api30"], 1, "2021-05", "TLA")
+
+
 def test_verifier_rejects_internally_consistent_wrong_partition(tmp_path: Path) -> None:
     collector = Collector(
         TwoPageClient(),  # type: ignore[arg-type]
@@ -1000,7 +1042,7 @@ class FakePreflightClient:
             row = {
                 **base,
                 "pool": params["pool"],
-                "chulNo1": 1,
+                "chulNo": 1,
                 "chulNo2": 2,
                 "chulNo3": 3,
             }
@@ -1246,7 +1288,7 @@ def test_endpoint_registry_freezes_transport_contract() -> None:
         )
         assert "totalCount" in spec.pagination
     selection_1 = ENDPOINTS["api30"].business_key_fields[3]
-    assert selection_1.aliases == ("chulNo", "chulNo1", "hrNo1")
+    assert selection_1.aliases == ("chulNo",)
 
 
 def test_business_keys_normalize_aliases_and_ignore_changed_values() -> None:
@@ -1265,9 +1307,9 @@ def test_business_keys_normalize_aliases_and_ignore_changed_values() -> None:
         "rc_date": "20210515",
         "rc_no": 1,
         "poolName": "TRI",
-        "hrNo1": 1,
-        "hrNo2": "02",
-        "hrNo3": 3,
+        "chulNo": 1,
+        "chulNo2": "02",
+        "chulNo3": 3,
         "odds": "100.0",
     }
     assert business_key_hash(spec, first) == business_key_hash(spec, changed_value)

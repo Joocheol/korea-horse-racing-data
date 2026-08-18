@@ -24,7 +24,7 @@
         {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
         {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
         {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
-        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo", "chulNo1", "hrNo", "hrNo1"]}
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo"]}
       ]
     },
     "api29": {
@@ -43,8 +43,8 @@
         {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
         {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
         {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
-        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo1", "hrNo1"]},
-        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2", "hrNo2"]}
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo1"]},
+        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2"]}
       ]
     },
     "api30": {
@@ -63,9 +63,9 @@
         {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
         {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
         {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
-        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo", "chulNo1", "hrNo1"]},
-        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2", "hrNo2"]},
-        {"name": "selection_3", "kind": "integer", "aliases": ["chulNo3", "hrNo3"]}
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo"]},
+        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2"]},
+        {"name": "selection_3", "kind": "integer", "aliases": ["chulNo3"]}
       ]
     },
     "api179": {
