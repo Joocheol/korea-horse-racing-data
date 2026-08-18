@@ -846,6 +846,56 @@ def test_verifier_recomputes_request_identity(tmp_path: Path) -> None:
     assert any(error.startswith("request_meet_mismatch") for error in report["errors"])
 
 
+def test_verifier_reports_durable_unresolved_request_state(tmp_path: Path) -> None:
+    collector = Collector(
+        FailIfCalledClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=100,
+        snapshot_id="request-state",
+    )
+    collector.record_request_state(
+        ENDPOINTS["api28"],
+        1,
+        "2021-05",
+        None,
+        "unresolved_transport",
+        "KRAResponseError",
+    )
+    assert (
+        verify_main(
+            [
+                "--root",
+                str(tmp_path),
+                "--snapshot-id",
+                "request-state",
+                "--start",
+                "2021-05",
+                "--end",
+                "2021-05",
+                "--meets",
+                "1",
+                "--endpoints",
+                "api28",
+            ]
+        )
+        == 2
+    )
+    report = json.loads(
+        (tmp_path / "reports" / "quality-request-state.json").read_text()
+    )
+    assert report["request_state_counts"]["unresolved_transport"] == 1
+    assert report["unresolved_requests"] == [
+        {
+            "endpoint_id": "api28",
+            "meet": 1,
+            "year_month": "2021-05",
+            "pool": None,
+            "state": "unresolved_transport",
+            "error_type": "KRAResponseError",
+        }
+    ]
+
+
 class MainRequestFailureSession:
     def __init__(self) -> None:
         self.calls = 0
@@ -1033,7 +1083,7 @@ class FakePreflightClient:
 
     def get(self, path: str, params: dict[str, object]):
         content = json.dumps({"probe": path, "params": params}, sort_keys=True).encode()
-        base = {"rcDate": "20200104", "rcNo": 1}
+        base = {"rcDate": f"{params['rc_month']}04", "rcNo": 1}
         if path.startswith("API28"):
             row = {**base, "pool": "WIN", "chulNo": 1}
         elif path.startswith("API29"):
@@ -1365,3 +1415,14 @@ def test_snapshot_pr_explicitly_dispatches_collector_ci() -> None:
     assert "workflow_dispatch:" in ci_workflow
     assert "TARGET_SHA: ${{ inputs.head_sha }}" in ci_workflow
     assert "context: 'Collector CI'" in ci_workflow
+
+
+def test_implementation_review_publishes_a_fixed_blocking_status() -> None:
+    root = Path(__file__).resolve().parents[1]
+    workflow = (
+        root / ".github" / "workflows" / "claude-implementation-review.yml"
+    ).read_text()
+    assert "contains(github.event.pull_request.labels" not in workflow
+    assert "statuses: write" in workflow
+    assert "context: 'Claude collector implementation review'" in workflow
+    assert "if: always()" in workflow

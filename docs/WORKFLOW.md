@@ -14,6 +14,9 @@
 8. 교수의 `kra-collection` environment 승인 뒤에만 수집한다.
 9. 같은 `snapshot_id`의 페이지 ledger와 파일 해시가 맞으면 마지막 완료 `pageNo` 다음부터
    재개하며, 완료된 논리 요청은 매니페스트로 건너뛴다.
+   개별 요청 실패는 별도 request-state ledger에 `retryable` 또는
+   `unresolved_transport`로 남기고 다음 논리 요청을 계속한다. 인증·일일쿼터 오류만
+   전체 실행을 즉시 중단한다.
 10. 수집 뒤 모든 행의 경주월·경마장이 요청 파티션과 맞는지 확인하고, 경주＋승식＋조합
     business key 중복 0, key 합집합=`totalCount`, 다음 페이지 0행, 원응답·정규화 해시를
     재검사한다.

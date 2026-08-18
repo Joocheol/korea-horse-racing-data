@@ -386,8 +386,49 @@ class Collector:
         self.page_ledger_path = (
             output_dir / "ledgers" / f"pages-{self.snapshot_id}.jsonl"
         )
+        self.request_state_path = (
+            output_dir / "ledgers" / f"requests-{self.snapshot_id}.jsonl"
+        )
         self.collector_commit = os.environ.get("GITHUB_SHA", "local")
         self._completed = self._load_completed_records()
+
+    def record_request_state(
+        self,
+        spec: EndpointSpec,
+        meet: int,
+        year_month: str,
+        pool: str | None,
+        state: str,
+        error_type: str | None = None,
+    ) -> None:
+        if state not in {"success", "retryable", "unresolved_transport"}:
+            raise ValueError(f"invalid request state: {state}")
+        params: dict[str, Any] = {
+            "meet": meet,
+            "rc_month": year_month.replace("-", ""),
+            "numOfRows": self.page_size,
+            "_type": spec.response_format,
+        }
+        if pool is not None:
+            params["pool"] = pool
+        entry = {
+            "schema_version": COLLECTOR_SCHEMA_VERSION,
+            "snapshot_id": self.snapshot_id,
+            "endpoint_id": spec.endpoint_id,
+            "meet": meet,
+            "year_month": year_month,
+            "pool": pool,
+            "request_id": request_id(spec.endpoint_id, params),
+            "canonical_params_without_service_key": params,
+            "state": state,
+            "error_type": error_type,
+            "recorded_at_utc": datetime.now(UTC).isoformat(),
+        }
+        self.request_state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.request_state_path.open("ab") as handle:
+            handle.write(canonical_json(entry) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     @staticmethod
     def _record_key(

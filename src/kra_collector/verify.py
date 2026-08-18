@@ -73,6 +73,26 @@ def main(argv: list[str] | None = None) -> int:
     meets = [int(value) for value in args.meets.split(",") if value]
     endpoint_ids = [value for value in args.endpoints.split(",") if value]
     expected = _expected_keys(args.start, args.end, meets, endpoint_ids)
+    request_state_path = root / "ledgers" / f"requests-{args.snapshot_id}.jsonl"
+    request_states: dict[tuple[str, int, str, str | None], dict[str, Any]] = {}
+    if request_state_path.exists():
+        for line in request_state_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                state_record = json.loads(line)
+                state_key = (
+                    str(state_record["endpoint_id"]),
+                    int(state_record["meet"]),
+                    str(state_record["year_month"]),
+                    state_record.get("pool"),
+                )
+                request_states[state_key] = state_record
+    unresolved_states = [
+        record
+        for key, record in request_states.items()
+        if key in expected and record.get("state") != "success"
+    ]
+    if unresolved_states:
+        errors.append(f"unresolved_request_states={len(unresolved_states)}")
     missing = sorted(expected - set(records), key=str)
     if missing:
         errors.append(f"missing_logical_requests={len(missing)}")
@@ -227,6 +247,23 @@ def main(argv: list[str] | None = None) -> int:
         "complete_logical_requests": len(set(records) & expected),
         "verified_rows": verified_rows,
         "zero_row_logical_requests": zero_row_logical_requests,
+        "request_state_counts": {
+            state: sum(
+                1 for record in request_states.values() if record.get("state") == state
+            )
+            for state in ("success", "retryable", "unresolved_transport")
+        },
+        "unresolved_requests": [
+            {
+                "endpoint_id": record["endpoint_id"],
+                "meet": record["meet"],
+                "year_month": record["year_month"],
+                "pool": record.get("pool"),
+                "state": record["state"],
+                "error_type": record.get("error_type"),
+            }
+            for record in unresolved_states
+        ],
         "enforced_gates": ENFORCED_GATES,
         "unrun_pilot_gates": UNRUN_PILOT_GATES,
         "pilot_promotion_ready": False,

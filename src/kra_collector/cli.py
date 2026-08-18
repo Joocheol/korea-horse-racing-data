@@ -7,7 +7,13 @@ import re
 import sys
 from pathlib import Path
 
-from .client import KRAAuthenticationError, KRAClient, KRAError
+from .client import (
+    KRAAuthenticationError,
+    KRAClient,
+    KRAError,
+    KRAQuotaExceededError,
+    KRARetryableResponseError,
+)
 from .collect import (
     MAX_CALLS_PER_LOGICAL_REQUEST,
     UNRUN_PILOT_GATES,
@@ -109,12 +115,49 @@ def main(argv: list[str] | None = None) -> int:
             key_id=os.environ.get("DATA_GO_KR_KEY_ID", "data-go-kr-service-key"),
         )
         completed = 0
+        request_failures = 0
         for month in months:
             for meet in meets:
                 for endpoint_id in endpoint_ids:
                     spec = ENDPOINTS[endpoint_id]
                     for pool in spec.pools:
-                        record = collector.collect_month(spec, meet, month, pool)
+                        try:
+                            record = collector.collect_month(spec, meet, month, pool)
+                        except (KRAAuthenticationError, KRAQuotaExceededError):
+                            collector.record_request_state(
+                                spec,
+                                meet,
+                                month,
+                                pool,
+                                "unresolved_transport",
+                                "fatal_auth_or_quota",
+                            )
+                            raise
+                        except KRARetryableResponseError as exc:
+                            collector.record_request_state(
+                                spec,
+                                meet,
+                                month,
+                                pool,
+                                "retryable",
+                                type(exc).__name__,
+                            )
+                            request_failures += 1
+                            continue
+                        except KRAError as exc:
+                            collector.record_request_state(
+                                spec,
+                                meet,
+                                month,
+                                pool,
+                                "unresolved_transport",
+                                type(exc).__name__,
+                            )
+                            request_failures += 1
+                            continue
+                        collector.record_request_state(
+                            spec, meet, month, pool, "success"
+                        )
                         completed += 1
                         print(
                             json.dumps(
@@ -131,7 +174,13 @@ def main(argv: list[str] | None = None) -> int:
                                 ensure_ascii=False,
                             )
                         )
-    except (KRAAuthenticationError, KRAError) as exc:
+        if request_failures:
+            print(
+                f"collection_incomplete=request_failures:{request_failures}",
+                file=sys.stderr,
+            )
+            return 2
+    except (KRAAuthenticationError, KRAQuotaExceededError) as exc:
         print(f"collection_failed={type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     except Exception:  # noqa: BLE001 - never expose an unexpected secret-bearing URL

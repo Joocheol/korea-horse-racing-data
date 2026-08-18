@@ -12,6 +12,7 @@ from .cli import month_range
 from .client import KRAClient, KRAError, sha256_bytes
 from .collect import (
     MAX_CALLS_PER_LOGICAL_REQUEST,
+    assert_row_matches_requested_partition,
     business_key_observation,
     canonical_json,
     write_atomic,
@@ -164,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     key_hash, observed_aliases = business_key_observation(
                         spec, envelope.rows[0]
+                    )
+                    assert_row_matches_requested_partition(
+                        spec, envelope.rows[0], params
                     )
                     pool_label = str(pool)
                     endpoint_keys = probe_keys.setdefault(endpoint_id, {})
