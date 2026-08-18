@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         client = KRAClient(secret)
-        print(f"service_key_input_form={client.input_key_form}; normalized_for_single_encoding=true")
+        print(f"service_key_candidate={client.key_candidate}; verified_by=API5")
         collector = Collector(
             client,
             Path(args.output),
