@@ -10,8 +10,8 @@ from .client import KRAClient, KRAError, sha256_bytes
 from .collect import canonical_json, write_atomic
 from .registry import ENDPOINTS
 
-OPERATING_CAPS = {"api179": 2_500}
-DEFAULT_OPERATING_CAP = 8_333
+OFFICIAL_DAILY_LIMIT = 3_000
+DEFAULT_OPERATING_CAP = 2_500  # reserve one sixth for probes and recovery
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,11 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     for endpoint_id in endpoint_ids:
         logical = len(ENDPOINTS[endpoint_id].pools) * len(meets) * len(months)
         conservative = logical * 3
-        cap = OPERATING_CAPS.get(endpoint_id, DEFAULT_OPERATING_CAP)
+        cap = DEFAULT_OPERATING_CAP
         budgets[endpoint_id] = {
             "logical_requests": logical,
             "conservative_requests": conservative,
+            "official_daily_limit": OFFICIAL_DAILY_LIMIT,
             "operating_cap": cap,
+            "account_tier": "development",
+            "production_stage": "review_required",
+            "production_review_lead_time": "unknown",
+            "estimated_operating_days": (conservative + cap - 1) // cap,
         }
         if conservative > cap:
             raise SystemExit(

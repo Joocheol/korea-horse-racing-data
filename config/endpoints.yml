@@ -1,5 +1,12 @@
 {
   "schema_version": "1",
+  "credential_probe": {
+    "endpoint_id": "api5",
+    "service": "API5",
+    "operation": "quinellaOddsInfo",
+    "response_format": "xml",
+    "required_params": ["meet", "rc_date", "rc_no", "pageNo", "numOfRows", "_type"]
+  },
   "endpoints": {
     "api28": {
       "service": "API28_1",

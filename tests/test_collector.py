@@ -52,9 +52,11 @@ def test_decoding_candidate_is_encoded_once_by_requests() -> None:
 
 
 class ProbeResponse:
-    def __init__(self, content: bytes, status_code: int = 200) -> None:
+    def __init__(
+        self, content: bytes, status_code: int = 200, content_type: str = "application/json"
+    ) -> None:
         self.content = content
-        self.headers = {"Content-Type": "application/json"}
+        self.headers = {"Content-Type": content_type}
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
@@ -81,14 +83,27 @@ class ProbeSession:
                 }
             }
         else:
-            payload = {
-                "response": {
-                    "header": {"resultCode": "00", "resultMsg": "NORMAL"},
-                    "body": {"items": {}, "totalCount": 0},
-                }
-            }
-            return ProbeResponse(json.dumps(payload).encode())
+            payload = b"""<response><header><resultCode>00</resultCode>
+            <resultMsg>NORMAL</resultMsg></header><body><items />
+            <totalCount>0</totalCount></body></response>"""
+            return ProbeResponse(payload, content_type="application/xml")
         return ProbeResponse(json.dumps(payload).encode(), status_code=400)
+
+
+class FlakyProbeSession(ProbeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.decoded_attempts = 0
+
+    def get(
+        self, url: str, *, params: dict[str, object], **kwargs: object
+    ) -> ProbeResponse:
+        candidate = str(params["serviceKey"])
+        if "%2B" not in candidate:
+            self.decoded_attempts += 1
+            if self.decoded_attempts == 1:
+                raise requests.Timeout("temporary probe timeout")
+        return super().get(url, params=params, **kwargs)
 
 
 def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:
@@ -97,6 +112,18 @@ def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:
     assert client.key_candidate == "url_decoded_once"
     assert client.service_key == "abc+def/ghi="
     assert session.candidates == ["abc%2Bdef%2Fghi%3D", "abc+def/ghi="]
+
+
+def test_live_xml_probe_retries_transient_transport_failure(monkeypatch) -> None:
+    monkeypatch.setattr("kra_collector.client.time.sleep", lambda _: None)
+    session = FlakyProbeSession()
+    client = KRAClient(
+        "abc%2Bdef%2Fghi%3D",
+        session=session,  # type: ignore[arg-type]
+        max_attempts=3,
+    )
+    assert client.key_candidate == "url_decoded_once"
+    assert session.decoded_attempts == 2
 
 
 def test_parse_json_envelope() -> None:
@@ -465,13 +492,10 @@ class MainRequestFailureSession:
     ) -> ProbeResponse:
         self.calls += 1
         if self.calls == 1:
-            payload = {
-                "response": {
-                    "header": {"resultCode": "00", "resultMsg": "NORMAL"},
-                    "body": {"items": {}, "totalCount": 0},
-                }
-            }
-            return ProbeResponse(json.dumps(payload).encode())
+            payload = b"""<response><header><resultCode>00</resultCode>
+            <resultMsg>NORMAL</resultMsg></header><body><items />
+            <totalCount>0</totalCount></body></response>"""
+            return ProbeResponse(payload, content_type="application/xml")
         return ProbeResponse(b"{}", status_code=400)
 
 

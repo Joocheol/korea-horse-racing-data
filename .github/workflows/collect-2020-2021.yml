@@ -56,6 +56,7 @@ jobs:
       INPUT_ENDPOINTS: ${{ inputs.endpoints }}
       INPUT_PAGE_SIZE: ${{ inputs.page_size }}
       PYTHONPATH: src
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

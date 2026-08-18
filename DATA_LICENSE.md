@@ -1,69 +1,42 @@
-# Data licensing and attribution
+# 데이터 이용조건과 출처
 
-## Release rule
+## 공개 원칙
 
-Project source code and project-authored documentation are released under the repository's MIT
-License. Source racing data are not blanket-relicensed by this project. Each data release inherits
-the official permission and attribution terms of every source that contributed to that release.
+프로젝트 코드와 프로젝트가 작성한 문서는 저장소의 MIT License를 따른다.
+KRA OpenAPI 원응답과 정규화 사실값은 아래 공공데이터포털 카탈로그에서
+2026-08-18 직접 확인한 `이용허락범위 제한 없음` 조건에 따라 공개할 수 있다.
+8개 데이터셋은 모두 무료이며 공공누리 유형은 별도로 표시되지 않았다.
 
-Each asset is gated separately. An annual partition may publish normalized facts only when every
-contributing endpoint has a recorded catalog URL, use scope, Public Nuri/attribution type,
-verification date, terms-text hash, next verification date, and permission for normalized-fact
-redistribution. Bulk raw responses are added only where bulk raw redistribution is separately
-confirmed. If normalized-fact permission for a source remains unverified, records depending on it
-are withheld. Derived states may be released only after they are recomputed without that source and,
-when evidence becomes insufficient, downgraded to `evidence_insufficient`.
+## 확인된 OpenAPI 8종
 
-## Endpoint register
+| 데이터셋 | 엔드포인트 | 이용허락범위 | 개발계정 일일 한도 | 운영단계 | 포맷 | 카탈로그 |
+| --- | --- | --- | ---: | --- | --- | --- |
+| 15059137 | `API28_1/singlePredictionRateInfo_1` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15059137/openapi.do) |
+| 15057397 | `API29_1/doublePredictionRateInfo_1` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15057397/openapi.do) |
+| 15058258 | `API30_1/triplePredictionRateInfo_1` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15058258/openapi.do) |
+| 15057896 | `API179_1/salesAndDividendRate_1` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15057896/openapi.do) |
+| 15057090 | `API5/quinellaOddsInfo` | 제한 없음 | 3,000 | 심의승인 | **XML 전용** | [링크](https://www.data.go.kr/data/15057090/openapi.do) |
+| 15058677 | `API26_2/entrySheet_2` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15058677/openapi.do) |
+| 15119524 | `API214_1/RaceDetailResult_1` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15119524/openapi.do) |
+| 15058305 | `API4_3/raceResult_3` | 제한 없음 | 3,000 | 심의승인 | JSON+XML | [링크](https://www.data.go.kr/data/15058305/openapi.do) |
 
-The following register is completed before the first data release. “Pending” means that the
-endpoint may be used for a private pilot but cannot contribute to a public release. Endpoint and
-behavioral evidence must be read from `docs/API_FINDINGS.md`, not inferred from README alone.
+위 표로 공개 API 원응답 bulk 재배포와 정규화 사실값 재배포의 확인 절차는
+충족된 것으로 처리한다. 운영계정 트래픽 상향은 자동승인이 아니라 심의승인이므로
+별도 승인 전에는 개발계정 한도를 적용한다.
 
-| Endpoint | Use scope | Public Nuri / attribution | Bulk raw redistribution | Normalized facts | Verified / next check | Terms hash | Catalog URL | Gate |
-|---|---|---|---|---|---|---|---|---|
-| `API28_1/singlePredictionRateInfo_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API29_1/doublePredictionRateInfo_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API30_1/triplePredictionRateInfo_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API5/quinellaOddsInfo` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API179_1/salesAndDividendRate_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API26_2/entrySheet_2` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API214_1/RaceDetailResult_1` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API4_3/raceResult_3` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked |
-| `API72_2/racePlan_2` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked; path unverified |
-| `API301/Dividend_rate_total` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Blocked; path unverified |
+## 출처표시
 
-An investigated catalog page checked on 2026-08-18 described its portal use scope as unrestricted.
-That field alone does not establish a Public Nuri type, attribution duty, or permission for bulk
-redistribution, and a non-v1 service's terms establish nothing for the endpoints above.
+각 Release에는 다음 출처를 표시한다.
 
-The recorded terms text is normalized and hashed with SHA-256. A changed hash or an overdue next
-check returns the endpoint to Pending until a human re-verifies the terms.
+> 출처: 한국마사회, 공공데이터포털(data.go.kr). 이용조건 확인일: 2026-08-18.
 
-## Release attribution
+API 기반 릴리스는 독립적인 공식 시행일 분모가 없으면
+`provisional_api_only`로 표시한다. 이는 라이선스 제한이 아니라 개최일 통누락을
+독립적으로 검출하지 못했다는 완전성 표시다.
 
-Every release includes the following text, expanded with endpoint URLs and the verification date:
+## 별도 격리 대상
 
-> Source: Korea Racing Authority, Korean Public Data Portal (data.go.kr). Source permission terms
-> verified on YYYY-MM-DD; see this release's DATA-LICENSE file.
-
-The release-specific `DATA-LICENSE-YYYY-vN.txt` states the most restrictive compatible terms that
-apply to the partition. It does not imply ownership of KRA source facts or waive source conditions.
-It also declares `final` or `provisional_api_only`. A provisional release states prominently that
-whole-meeting-day omission could not be checked against an independent schedule denominator.
-Only an official schedule/change/cancellation/sales-suspension notice published outside the same
-OpenAPI delivery path qualifies as the independent denominator for `final`; API26 or API72 alone
-does not.
-
-## Exclusions
-
-Public releases exclude:
-
-- API credentials, GitHub Actions secrets, unredacted request URLs, and secret-bearing logs
-- personal or local storage paths
-- raw KRA website HTML, PDFs, images, logos, or other content without verified redistribution terms
-- third-party data without an explicit compatible license
-
-KRA web facts may be normalized only after the applicable terms and provenance are recorded. Raw
-web material remains private and is removed under the retention rule in the collection plan unless
-redistribution permission is confirmed.
+위 공개조건은 공공데이터포털 OpenAPI 8종에만 적용한다. KRA 웹사이트에서 별도로
+스크래핑한 HTML·PDF·이미지·로고 등은 재배포 조건이 확인되기 전 공개하지 않고
+비공개 격리한다. API 인증키, GitHub Actions Secret, 인증키가 포함된 URL·로그,
+개인 저장경로도 공개하지 않는다.
