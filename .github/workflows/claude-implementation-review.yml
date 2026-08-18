@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - '.github/workflows/**'
+      - 'config/**'
       - 'requirements.txt'
 
 permissions: {}
@@ -65,7 +66,7 @@ jobs:
 
   report:
     needs: review
-    if: always()
+    if: always() && needs.review.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

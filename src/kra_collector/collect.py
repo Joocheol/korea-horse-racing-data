@@ -244,6 +244,14 @@ class Collector:
                 )
             if expected_total is None:
                 expected_total = envelope.total_count
+                if (
+                    0 < len(envelope.rows) < expected_total
+                    and len(envelope.rows) < self.page_size
+                ):
+                    raise KRAResponseError(
+                        "observed server page cap differs from requested numOfRows "
+                        f"for {spec.endpoint_id}; rerun preflight before collection"
+                    )
             elif envelope.total_count != expected_total:
                 raise KRAResponseError(
                     f"totalCount changed for {spec.endpoint_id} meet={meet} month={year_month} "

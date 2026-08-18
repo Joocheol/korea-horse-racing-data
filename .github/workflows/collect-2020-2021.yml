@@ -39,9 +39,10 @@ jobs:
     timeout-minutes: 210
     environment: kra-collection
     permissions:
-      actions: read
+      actions: write
       contents: write
       pull-requests: write
+      statuses: write
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
       DATA_GO_KR_KEY_ID: data-go-kr-service-key
@@ -87,8 +88,8 @@ jobs:
           if not endpoints or any(item not in {"api28", "api29", "api30", "api179"} for item in endpoints):
               raise SystemExit("invalid endpoints input")
           page_size = os.environ["INPUT_PAGE_SIZE"]
-          if not re.fullmatch(r"\d{1,6}", page_size) or not 1 <= int(page_size) <= 100000:
-              raise SystemExit("invalid page_size input")
+          if page_size != "100000":
+              raise SystemExit("page_size must remain at the frozen value 100000")
           PY
 
       - name: Restore the newest partial artifact for this snapshot
@@ -199,9 +200,18 @@ jobs:
           put_file "reports/preflight-${SNAPSHOT_ID}.json" \
             "$OUTPUT_ROOT/preflight/preflight.json"
 
-          gh pr create --base "$BASE_BRANCH" --head "$branch" \
+          pr_url="$(gh pr create --base "$BASE_BRANCH" --head "$branch" \
             --title "Record verified KRA snapshot ${SNAPSHOT_ID}" \
-            --body "Verified transport-level manifest and quality report. Raw responses remain outside Git pending the data-license gate. Full pilot promotion remains false until the quality report's unrun gates are completed."
+            --body "Verified transport-level manifest and quality report. Raw responses remain outside Git pending the data-license gate. Full pilot promotion remains false until the quality report's unrun gates are completed. Raw response artifacts have 90-day retention; approval must not outlive their reproducibility window.")"
+
+          pr_number="${pr_url##*/}"
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq .object.sha)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head_sha}" \
+            -f state=pending \
+            -f context='Claude collected-data report review' \
+            -f description='Explicit artifact review dispatch queued'
+          gh workflow run claude-data-review.yml --ref "$BASE_BRANCH" \
+            -f pr_number="$pr_number" -f head_sha="$head_sha"
 
       - name: Enforce collection and verification result
         if: always()

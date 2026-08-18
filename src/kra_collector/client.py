@@ -41,6 +41,10 @@ class KRARetryableResponseError(KRAError):
     """A temporary KRA application-envelope failure that may be retried."""
 
 
+class KRAQuotaExceededError(KRAError):
+    """The daily quota is exhausted and cannot recover during this run."""
+
+
 def service_key_candidates(value: str) -> list[tuple[str, str]]:
     """Return candidates without guessing the key format from its appearance."""
     key = value.strip()
@@ -91,8 +95,11 @@ def _raise_application_error(code: str, message: str) -> None:
     ):
         raise KRAAuthenticationError(f"KRA application error: {code or 'unknown'}")
     if code in RETRYABLE_RESULT_CODES or any(
-        token in error_text
-        for token in ("LIMIT", "QUOTA", "TEMPOR", "UNAVAILABLE", "초과")
+        token in error_text for token in ("DAILY", "QUOTA", "LIMITED_NUMBER", "초과")
+    ):
+        raise KRAQuotaExceededError(f"KRA daily quota exhausted: {code or 'unknown'}")
+    if any(
+        token in error_text for token in ("TEMPOR", "UNAVAILABLE", "TOO MANY REQUESTS")
     ):
         raise KRARetryableResponseError(
             f"KRA temporary application error: {code or 'unknown'}"

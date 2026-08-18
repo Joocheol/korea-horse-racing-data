@@ -9,7 +9,13 @@ from typing import Any
 
 from .cli import month_range
 from .client import KRAResponseError, parse_envelope, sha256_bytes
-from .collect import ENFORCED_GATES, UNRUN_PILOT_GATES, canonical_json, write_atomic
+from .collect import (
+    ENFORCED_GATES,
+    UNRUN_PILOT_GATES,
+    canonical_json,
+    request_id,
+    write_atomic,
+)
 from .registry import ENDPOINTS
 
 
@@ -73,6 +79,17 @@ def main(argv: list[str] | None = None) -> int:
         if key not in expected:
             continue
         total_count = int(record["total_count"])
+        params = record.get("canonical_params_without_service_key", {})
+        if request_id(str(record["endpoint_id"]), params) != record.get("request_id"):
+            errors.append(f"request_id_mismatch:{key}")
+        if int(params.get("meet", -1)) != key[1]:
+            errors.append(f"request_meet_mismatch:{key}")
+        if str(params.get("rc_month", "")) != key[2].replace("-", ""):
+            errors.append(f"request_month_mismatch:{key}")
+        if params.get("pool") != key[3] and not (
+            key[3] is None and "pool" not in params
+        ):
+            errors.append(f"request_pool_mismatch:{key}")
         if total_count == 0:
             zero_row_logical_requests += 1
         if int(record["stored_rows"]) != total_count:
@@ -81,9 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
         raw_row_hashes: set[str] = set()
         pages = record.get("pages", [])
-        page_size = int(
-            record.get("canonical_params_without_service_key", {}).get("numOfRows", 0)
-        )
+        page_size = int(params.get("numOfRows", 0))
         expected_page_count = (
             max(1, math.ceil(total_count / page_size)) if page_size > 0 else 0
         )

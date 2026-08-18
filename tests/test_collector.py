@@ -12,8 +12,8 @@ from kra_collector.cli import month_range
 from kra_collector.client import (
     KRAAuthenticationError,
     KRAClient,
+    KRAQuotaExceededError,
     KRAResponseError,
-    KRARetryableResponseError,
     ParsedEnvelope,
     parse_envelope,
     service_key_candidates,
@@ -128,8 +128,10 @@ def test_parse_json_envelope() -> None:
         },
     ],
 )
-def test_http_200_json_quota_envelope_is_retryable(payload: dict[str, object]) -> None:
-    with pytest.raises(KRARetryableResponseError):
+def test_http_200_json_daily_quota_envelope_stops_immediately(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(KRAQuotaExceededError):
         parse_envelope(json.dumps(payload).encode(), "application/json")
 
 
@@ -275,6 +277,28 @@ def test_overlapping_pages_fail_closed(tmp_path: Path) -> None:
         collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
 
 
+class ServerCapClient(TwoPageClient):
+    def get(self, path: str, params: dict[str, object]):
+        rows = [{"row": 1}, {"row": 2}]
+        content = json.dumps({"rows": rows}).encode()
+        return (
+            content,
+            "application/json",
+            ParsedEnvelope(rows, 10, "00", "NORMAL", "json"),
+        )
+
+
+def test_unexpected_server_page_cap_fails_on_first_page(tmp_path: Path) -> None:
+    collector = Collector(
+        ServerCapClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=100_000,
+        snapshot_id="server-cap",
+    )
+    with pytest.raises(KRAResponseError, match="server page cap"):
+        collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
 class FailIfCalledClient:
     def get(self, path: str, params: dict[str, object]):
         raise AssertionError("network call should have been skipped by the ledger")
@@ -394,6 +418,42 @@ def test_verifier_rejects_manifest_page_gap(tmp_path: Path) -> None:
     assert result == 2
     report = json.loads((tmp_path / "reports" / "quality-page-gap.json").read_text())
     assert any(error.startswith("page_sequence_mismatch") for error in report["errors"])
+
+
+def test_verifier_recomputes_request_identity(tmp_path: Path) -> None:
+    collector = Collector(
+        TwoPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="request-identity",
+    )
+    collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    manifest_path = tmp_path / "manifests" / "manifest-request-identity.jsonl"
+    record = json.loads(manifest_path.read_text())
+    record["canonical_params_without_service_key"]["meet"] = 2
+    manifest_path.write_text(json.dumps(record) + "\n")
+    result = verify_main(
+        [
+            "--root",
+            str(tmp_path),
+            "--snapshot-id",
+            "request-identity",
+            "--start",
+            "2021-05",
+            "--end",
+            "2021-05",
+            "--meets",
+            "1",
+            "--endpoints",
+            "api28",
+        ]
+    )
+    assert result == 2
+    report = json.loads(
+        (tmp_path / "reports" / "quality-request-identity.json").read_text()
+    )
+    assert any(error.startswith("request_id_mismatch") for error in report["errors"])
+    assert any(error.startswith("request_meet_mismatch") for error in report["errors"])
 
 
 class MainRequestFailureSession:
