@@ -39,10 +39,10 @@ def test_decoding_candidate_is_encoded_once_by_requests() -> None:
 
 
 class ProbeResponse:
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes, status_code: int = 200) -> None:
         self.content = content
         self.headers = {"Content-Type": "application/json"}
-        self.status_code = 200
+        self.status_code = status_code
 
     def raise_for_status(self) -> None:
         return None
@@ -72,7 +72,8 @@ class ProbeSession:
                     "body": {"items": {}, "totalCount": 0},
                 }
             }
-        return ProbeResponse(json.dumps(payload).encode())
+            return ProbeResponse(json.dumps(payload).encode())
+        return ProbeResponse(json.dumps(payload).encode(), status_code=400)
 
 
 def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:

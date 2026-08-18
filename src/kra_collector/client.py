@@ -169,15 +169,30 @@ class KRAClient:
                     timeout=self.timeout_seconds,
                     headers={"User-Agent": "korea-horse-racing-data/0.1 (+public research)"},
                 )
-                response.raise_for_status()
+            except requests.RequestException as exc:
+                raise KRAResponseError(
+                    "API5 credential probe could not complete because of a transport error"
+                ) from exc
+
+            # An already encoded key passed through requests(params=...) is
+            # double-encoded and data.go.kr commonly answers HTTP 400. That is
+            # a candidate rejection, not a reason to skip the decoded candidate.
+            if response.status_code in RETRYABLE_HTTP or response.status_code >= 500:
+                raise KRAResponseError(
+                    f"API5 credential probe received retryable HTTP {response.status_code}"
+                )
+            if response.status_code >= 400:
+                failures.append(f"{label}:http_{response.status_code}")
+                continue
+
+            try:
                 parse_envelope(response.content, response.headers.get("Content-Type", ""))
-                return candidate, label
             except KRAAuthenticationError:
                 failures.append(f"{label}:authentication_rejected")
-            except (requests.RequestException, KRAResponseError) as exc:
-                raise KRAResponseError(
-                    "API5 credential probe could not complete because of a transport or response error"
-                ) from exc
+            except KRAResponseError:
+                failures.append(f"{label}:invalid_response")
+            else:
+                return candidate, label
         tried = ", ".join(failures) or "no valid candidate"
         raise KRAAuthenticationError(
             "API5 rejected every service-key candidate "
