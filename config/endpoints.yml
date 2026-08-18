@@ -1,5 +1,12 @@
 {
   "schema_version": "2",
+  "credential_probe": {
+    "endpoint_id": "api5",
+    "service": "API5",
+    "operation": "quinellaOddsInfo",
+    "response_format": "xml",
+    "required_params": ["meet", "rc_date", "rc_no", "pageNo", "numOfRows", "_type"]
+  },
   "endpoints": {
     "api28": {
       "service": "API28_1",
@@ -56,7 +63,7 @@
         {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
         {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
         {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
-        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo1", "hrNo1"]},
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo", "chulNo1", "hrNo1"]},
         {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2", "hrNo2"]},
         {"name": "selection_3", "kind": "integer", "aliases": ["chulNo3", "hrNo3"]}
       ]

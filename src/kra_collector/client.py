@@ -7,6 +7,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
@@ -26,7 +27,7 @@ PROBE_PARAMS = {
     "rc_no": 1,
     "pageNo": 1,
     "numOfRows": 1,
-    "_type": "json",
+    "_type": "xml",
 }
 
 
@@ -48,6 +49,25 @@ class KRARetryableResponseError(KRAError):
 
 class KRAQuotaExceededError(KRAError):
     """The daily quota is exhausted and cannot recover during this run."""
+
+
+def retry_after_seconds(
+    value: str | None, *, now: datetime | None = None
+) -> float | None:
+    """Parse Retry-After delta-seconds or an RFC HTTP-date."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    if stripped.isdigit():
+        return float(stripped)
+    try:
+        target = parsedate_to_datetime(stripped)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=UTC)
+    current = now or datetime.now(UTC)
+    return max(0.0, (target - current).total_seconds())
 
 
 def service_key_candidates(value: str) -> list[tuple[str, str]]:
@@ -301,42 +321,65 @@ class KRAClient:
 
         failures: list[str] = []
         for label, candidate in service_key_candidates(raw_service_key):
-            try:
-                self._record_call(PROBE_PATH, "credential_probe")
-                response = self.session.get(
-                    f"{BASE_URL}/{PROBE_PATH}",
-                    params={"serviceKey": candidate, **PROBE_PARAMS},
-                    timeout=self.timeout_seconds,
-                    headers={
-                        "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
-                    },
-                )
-            except requests.RequestException as exc:
-                raise KRAResponseError(
-                    "API5 credential probe could not complete because of a transport error"
-                ) from exc
+            for attempt in range(1, self.max_attempts + 1):
+                try:
+                    self._record_call(PROBE_PATH, "credential_probe")
+                    response = self.session.get(
+                        f"{BASE_URL}/{PROBE_PATH}",
+                        params={"serviceKey": candidate, **PROBE_PARAMS},
+                        timeout=self.timeout_seconds,
+                        headers={
+                            "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
+                        },
+                    )
+                except (requests.Timeout, requests.ConnectionError):
+                    if attempt < self.max_attempts:
+                        time.sleep(min(2 ** (attempt - 1), 30.0))
+                        continue
+                    failures.append(f"{label}:transport_exhausted")
+                    break
+                except requests.RequestException:
+                    failures.append(f"{label}:transport_fatal")
+                    break
 
-            # An already encoded key passed through requests(params=...) is
-            # double-encoded and data.go.kr commonly answers HTTP 400. That is
-            # a candidate rejection, not a reason to skip the decoded candidate.
-            if response.status_code in RETRYABLE_HTTP or response.status_code >= 500:
-                raise KRAResponseError(
-                    f"API5 credential probe received retryable HTTP {response.status_code}"
-                )
-            if response.status_code >= 400:
-                failures.append(f"{label}:http_{response.status_code}")
-                continue
+                # An encoded key passed through requests(params=...) is
+                # double-encoded. Reject that candidate but still try the
+                # URL-decoded candidate after a non-retryable HTTP response.
+                if response.status_code in RETRYABLE_HTTP:
+                    if attempt < self.max_attempts:
+                        delay = retry_after_seconds(response.headers.get("Retry-After"))
+                        time.sleep(
+                            delay
+                            if delay is not None
+                            else min(2 ** (attempt - 1), 30.0)
+                        )
+                        continue
+                    failures.append(f"{label}:http_{response.status_code}_exhausted")
+                    break
+                if response.status_code >= 400:
+                    failures.append(f"{label}:http_{response.status_code}")
+                    break
 
-            try:
-                parse_envelope(
-                    response.content, response.headers.get("Content-Type", "")
-                )
-            except KRAAuthenticationError:
-                failures.append(f"{label}:authentication_rejected")
-            except KRAResponseError:
-                failures.append(f"{label}:invalid_response")
-            else:
-                return candidate, label
+                try:
+                    parse_envelope(
+                        response.content,
+                        response.headers.get("Content-Type", ""),
+                        "xml",
+                    )
+                except KRAAuthenticationError:
+                    failures.append(f"{label}:authentication_rejected")
+                    break
+                except KRARetryableResponseError:
+                    if attempt < self.max_attempts:
+                        time.sleep(min(2 ** (attempt - 1), 30.0))
+                        continue
+                    failures.append(f"{label}:application_retry_exhausted")
+                    break
+                except KRAResponseError:
+                    failures.append(f"{label}:invalid_response")
+                    break
+                else:
+                    return candidate, label
         tried = ", ".join(failures) or "no valid candidate"
         raise KRAAuthenticationError(
             "API5 rejected every service-key candidate "
@@ -372,14 +415,13 @@ class KRAClient:
                 self._last_request_at = time.monotonic()
                 if response.status_code in RETRYABLE_HTTP:
                     last_status = response.status_code
-                    retry_after = response.headers.get("Retry-After")
-                    delay = (
-                        float(retry_after)
-                        if retry_after and retry_after.isdigit()
-                        else 2 ** (attempt - 1)
-                    )
+                    delay = retry_after_seconds(response.headers.get("Retry-After"))
                     if attempt < self.max_attempts:
-                        time.sleep(min(delay, 30.0))
+                        time.sleep(
+                            delay
+                            if delay is not None
+                            else min(2 ** (attempt - 1), 30.0)
+                        )
                     continue
                 if response.status_code >= 400:
                     raise KRAResponseError(f"KRA HTTP error: {response.status_code}")

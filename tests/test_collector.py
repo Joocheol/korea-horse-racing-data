@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gzip
 import json
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -18,6 +20,7 @@ from kra_collector.client import (
     KRARetryableResponseError,
     ParsedEnvelope,
     parse_envelope,
+    retry_after_seconds,
     service_key_candidates,
     sha256_bytes,
 )
@@ -58,9 +61,16 @@ def test_decoding_candidate_is_encoded_once_by_requests() -> None:
 
 
 class ProbeResponse:
-    def __init__(self, content: bytes, status_code: int = 200) -> None:
+    def __init__(
+        self,
+        content: bytes,
+        status_code: int = 200,
+        *,
+        content_type: str = "application/json",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.content = content
-        self.headers = {"Content-Type": "application/json"}
+        self.headers = {"Content-Type": content_type, **(headers or {})}
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
@@ -87,14 +97,13 @@ class ProbeSession:
                 }
             }
         else:
-            payload = {
-                "response": {
-                    "header": {"resultCode": "00", "resultMsg": "NORMAL"},
-                    "body": {"items": {}, "totalCount": 0},
-                }
-            }
-            return ProbeResponse(json.dumps(payload).encode())
+            return ProbeResponse(api5_success_xml(), content_type="application/xml")
         return ProbeResponse(json.dumps(payload).encode(), status_code=400)
+
+
+def api5_success_xml() -> bytes:
+    return b"""<response><header><resultCode>00</resultCode><resultMsg>NORMAL</resultMsg>
+    </header><body><items/><totalCount>0</totalCount></body></response>"""
 
 
 def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:
@@ -103,6 +112,35 @@ def test_live_probe_selects_decoded_candidate_without_logging_key() -> None:
     assert client.key_candidate == "url_decoded_once"
     assert client.service_key == "abc+def/ghi="
     assert session.candidates == ["abc%2Bdef%2Fghi%3D", "abc+def/ghi="]
+
+
+class FlakyProbeSession:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get(
+        self, url: str, *, params: dict[str, object], **kwargs: object
+    ) -> ProbeResponse:
+        self.calls += 1
+        if self.calls == 1:
+            raise requests.Timeout("transient probe timeout")
+        return ProbeResponse(api5_success_xml(), content_type="application/xml")
+
+
+def test_live_xml_probe_retries_transient_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FlakyProbeSession()
+    sleeps: list[float] = []
+    monkeypatch.setattr("kra_collector.client.time.sleep", sleeps.append)
+    client = KRAClient(
+        "safe-key",
+        session=session,
+        max_attempts=2,  # type: ignore[arg-type]
+    )
+    assert client.key_candidate == "as_provided"
+    assert session.calls == 2
+    assert sleeps == [1]
 
 
 def test_parse_json_envelope() -> None:
@@ -309,6 +347,56 @@ def test_overlapping_pages_fail_closed(tmp_path: Path) -> None:
         collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
 
 
+class TotalCountDriftClient(TwoPageClient):
+    def get(self, path: str, params: dict[str, object]):
+        page = int(params["pageNo"])
+        if page == 1:
+            return super().get(path, params)
+        rows = [api28_row(3, "4.3")]
+        content = json.dumps({"page": page, "rows": rows}).encode()
+        return (
+            content,
+            "application/json",
+            ParsedEnvelope(rows, 4, "00", "NORMAL", "json"),
+        )
+
+
+def test_total_count_drift_fails_closed(tmp_path: Path) -> None:
+    collector = Collector(
+        TotalCountDriftClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="total-count-drift",
+    )
+    with pytest.raises(KRAResponseError, match="totalCount changed"):
+        collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
+class NonemptyTerminalProbeClient(TwoPageClient):
+    def get(self, path: str, params: dict[str, object]):
+        page = int(params["pageNo"])
+        if page < 3:
+            return super().get(path, params)
+        rows = [api28_row(4, "5.4")]
+        content = json.dumps({"page": page, "rows": rows}).encode()
+        return (
+            content,
+            "application/json",
+            ParsedEnvelope(rows, 3, "00", "NORMAL", "json"),
+        )
+
+
+def test_nonempty_terminal_probe_fails_closed(tmp_path: Path) -> None:
+    collector = Collector(
+        NonemptyTerminalProbeClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="nonempty-terminal",
+    )
+    with pytest.raises(KRAResponseError, match="terminal page is not empty"):
+        collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+
 class ServerCapClient(TwoPageClient):
     def get(self, path: str, params: dict[str, object]):
         rows = [api28_row(1, "2.1"), api28_row(2, "3.2")]
@@ -403,6 +491,30 @@ def test_partial_page_ledger_resumes_at_next_page(tmp_path: Path) -> None:
     assert client.pages == [2, 3]
     assert record.resumed is True
     assert record.stored_rows == 3
+
+
+def test_partial_resume_rejects_tampered_raw_page(tmp_path: Path) -> None:
+    interrupted = Collector(
+        InterruptAfterPageOneClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="tampered-partial",
+    )
+    with pytest.raises(KRAResponseError, match="simulated interruption"):
+        interrupted.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+
+    ledger_path = tmp_path / "ledgers" / "pages-tampered-partial.jsonl"
+    entry = json.loads(ledger_path.read_text().splitlines()[0])
+    raw_path = tmp_path / entry["page"]["raw_path"]
+    raw_path.write_bytes(raw_path.read_bytes() + b"\n")
+
+    with pytest.raises(KRAResponseError, match="partial raw page hash differs"):
+        Collector(
+            TrackingTwoPageClient(),  # type: ignore[arg-type]
+            tmp_path,
+            page_size=2,
+            snapshot_id="tampered-partial",
+        ).collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
 
 
 def test_partial_resume_survives_commit_change_when_contract_is_same(
@@ -527,6 +639,42 @@ def test_verifier_rejects_manifest_page_gap(tmp_path: Path) -> None:
     assert any(error.startswith("page_sequence_mismatch") for error in report["errors"])
 
 
+def test_verifier_rejects_missing_terminal_probe(tmp_path: Path) -> None:
+    collector = Collector(
+        TwoPageClient(),  # type: ignore[arg-type]
+        tmp_path,
+        page_size=2,
+        snapshot_id="missing-terminal",
+    )
+    collector.collect_month(ENDPOINTS["api28"], 1, "2021-05", None)
+    manifest_path = tmp_path / "manifests" / "manifest-missing-terminal.jsonl"
+    record = json.loads(manifest_path.read_text())
+    record["terminal_probe"] = None
+    manifest_path.write_text(json.dumps(record) + "\n")
+
+    result = verify_main(
+        [
+            "--root",
+            str(tmp_path),
+            "--snapshot-id",
+            "missing-terminal",
+            "--start",
+            "2021-05",
+            "--end",
+            "2021-05",
+            "--meets",
+            "1",
+            "--endpoints",
+            "api28",
+        ]
+    )
+    assert result == 2
+    report = json.loads(
+        (tmp_path / "reports" / "quality-missing-terminal.json").read_text()
+    )
+    assert any(error.startswith("terminal_probe_missing") for error in report["errors"])
+
+
 def test_verifier_recomputes_request_identity(tmp_path: Path) -> None:
     collector = Collector(
         TwoPageClient(),  # type: ignore[arg-type]
@@ -572,13 +720,7 @@ class MainRequestFailureSession:
     ) -> ProbeResponse:
         self.calls += 1
         if self.calls == 1:
-            payload = {
-                "response": {
-                    "header": {"resultCode": "00", "resultMsg": "NORMAL"},
-                    "body": {"items": {}, "totalCount": 0},
-                }
-            }
-            return ProbeResponse(json.dumps(payload).encode())
+            return ProbeResponse(api5_success_xml(), content_type="application/xml")
         return ProbeResponse(b"{}", status_code=400)
 
 
@@ -597,9 +739,15 @@ def test_http_error_does_not_retry_or_expose_query_string() -> None:
 
 
 class AlwaysSuccessfulSession:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def get(
         self, url: str, *, params: dict[str, object], **kwargs: object
     ) -> ProbeResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return ProbeResponse(api5_success_xml(), content_type="application/xml")
         payload = {
             "response": {
                 "header": {"resultCode": "00", "resultMsg": "NORMAL"},
@@ -626,6 +774,120 @@ def test_quota_ledger_counts_attempts_and_enforces_local_cap(
         client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 2})
     records = [json.loads(line) for line in ledger.read_text().splitlines()]
     assert [record["endpoint_id"] for record in records] == ["api5", "api28"]
+
+
+def successful_json_response() -> ProbeResponse:
+    payload = {
+        "response": {
+            "header": {"resultCode": "00", "resultMsg": "NORMAL"},
+            "body": {"items": {}, "totalCount": 0},
+        }
+    }
+    return ProbeResponse(json.dumps(payload).encode())
+
+
+class ProbeThenScriptedSession:
+    def __init__(self, scripted: list[ProbeResponse]) -> None:
+        self.scripted = scripted
+        self.calls = 0
+
+    def get(
+        self, url: str, *, params: dict[str, object], **kwargs: object
+    ) -> ProbeResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return ProbeResponse(api5_success_xml(), content_type="application/xml")
+        return self.scripted.pop(0)
+
+
+def test_retry_after_parser_supports_seconds_and_http_date() -> None:
+    now = datetime(2026, 8, 18, 5, 0, tzinfo=UTC)
+    assert retry_after_seconds("7", now=now) == 7
+    assert (
+        retry_after_seconds(
+            format_datetime(now + timedelta(seconds=30), usegmt=True), now=now
+        )
+        == 30
+    )
+    assert retry_after_seconds("not-a-retry-after", now=now) is None
+
+
+def test_429_honors_numeric_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = ProbeThenScriptedSession(
+        [
+            ProbeResponse(b"{}", status_code=429, headers={"Retry-After": "7"}),
+            successful_json_response(),
+        ]
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("kra_collector.client.time.sleep", sleeps.append)
+    client = KRAClient(
+        "safe-key",
+        session=session,  # type: ignore[arg-type]
+        minimum_interval_seconds=0,
+        max_attempts=2,
+    )
+    client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 1})
+    assert sleeps == [7]
+    assert session.calls == 3
+
+
+def test_429_honors_http_date_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    retry_at = format_datetime(datetime.now(UTC) + timedelta(seconds=30), usegmt=True)
+    session = ProbeThenScriptedSession(
+        [
+            ProbeResponse(b"{}", status_code=429, headers={"Retry-After": retry_at}),
+            successful_json_response(),
+        ]
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("kra_collector.client.time.sleep", sleeps.append)
+    client = KRAClient(
+        "safe-key",
+        session=session,  # type: ignore[arg-type]
+        minimum_interval_seconds=0,
+        max_attempts=2,
+    )
+    client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 1})
+    assert len(sleeps) == 1
+    assert 20 <= sleeps[0] <= 30
+
+
+def test_repeated_503_stops_after_max_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = ProbeThenScriptedSession(
+        [ProbeResponse(b"{}", status_code=503) for _ in range(3)]
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("kra_collector.client.time.sleep", sleeps.append)
+    client = KRAClient(
+        "safe-key",
+        session=session,  # type: ignore[arg-type]
+        minimum_interval_seconds=0,
+        max_attempts=3,
+    )
+    with pytest.raises(KRARetryableResponseError, match="after 3 attempts"):
+        client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 1})
+    assert session.calls == 4
+    assert sleeps == [1, 2]
+
+
+def test_http_200_daily_quota_envelope_is_not_retried() -> None:
+    payload = {
+        "returnReasonCode": "22",
+        "errMsg": "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR",
+    }
+    session = ProbeThenScriptedSession([ProbeResponse(json.dumps(payload).encode())])
+    client = KRAClient(
+        "safe-key",
+        session=session,  # type: ignore[arg-type]
+        minimum_interval_seconds=0,
+        max_attempts=5,
+    )
+    with pytest.raises(KRAQuotaExceededError):
+        client.get("API28_1/singlePredictionRateInfo_1", {"pageNo": 1})
+    assert session.calls == 2
 
 
 class FakePreflightClient:
@@ -755,22 +1017,99 @@ def test_secret_scan_writes_redacted_quarantine_report(
 def test_machine_readable_gate_registry_matches_collector() -> None:
     root = Path(__file__).resolve().parents[1]
     registry = json.loads((root / "config" / "verification-gates.json").read_text())
-    assert registry["core_transport"] == ENFORCED_GATES
-    assert registry["full_pilot_required"] == UNRUN_PILOT_GATES
+    expected_core = [
+        "all_pages_total_count_constant",
+        "business_key_unique_across_pages",
+        "business_key_union_equals_total_count",
+        "terminal_page_empty",
+        "raw_sha256_verified",
+        "normalized_content_sha256_verified",
+    ]
+    expected_pilot = [
+        "api26_independent_starter_count",
+        "api5_api29_quinella_cell_agreement",
+        "overround_vs_verified_takeout",
+        "turnover_ticket_interval_check",
+        "turnover_and_finish_order_race_classification",
+        "seven_pool_completeness",
+        "quarantine_table_preservation",
+    ]
+    assert registry["core_transport"] == expected_core
+    assert registry["full_pilot_required"] == expected_pilot
+    assert ENFORCED_GATES == expected_core
+    assert UNRUN_PILOT_GATES == expected_pilot
 
 
 def test_endpoint_registry_freezes_transport_contract() -> None:
     root = Path(__file__).resolve().parents[1]
     registry = json.loads((root / "config" / "endpoints.yml").read_text())
-    assert set(registry["endpoints"]) == set(ENDPOINTS)
-    for endpoint_id, spec in ENDPOINTS.items():
-        frozen = registry["endpoints"][endpoint_id]
-        assert frozen["response_format"] == spec.response_format == "json"
-        assert "totalCount" in frozen["pagination"]
-        assert set(spec.success_codes)
-        assert spec.business_key_fields
-        if spec.pool_param == "required":
-            assert all(pool is not None for pool in spec.pools)
+    assert registry["credential_probe"] == {
+        "endpoint_id": "api5",
+        "service": "API5",
+        "operation": "quinellaOddsInfo",
+        "response_format": "xml",
+        "required_params": [
+            "meet",
+            "rc_date",
+            "rc_no",
+            "pageNo",
+            "numOfRows",
+            "_type",
+        ],
+    }
+    expected = {
+        "api28": {
+            "path": "API28_1/singlePredictionRateInfo_1",
+            "pool_param": "prohibited",
+            "pools": (None,),
+            "key_fields": ("race_date", "race_number", "market", "selection_1"),
+        },
+        "api29": {
+            "path": "API29_1/doublePredictionRateInfo_1",
+            "pool_param": "prohibited",
+            "pools": (None,),
+            "key_fields": (
+                "race_date",
+                "race_number",
+                "market",
+                "selection_1",
+                "selection_2",
+            ),
+        },
+        "api30": {
+            "path": "API30_1/triplePredictionRateInfo_1",
+            "pool_param": "required",
+            "pools": ("TLA", "TRI"),
+            "key_fields": (
+                "race_date",
+                "race_number",
+                "market",
+                "selection_1",
+                "selection_2",
+                "selection_3",
+            ),
+        },
+        "api179": {
+            "path": "API179_1/salesAndDividendRate_1",
+            "pool_param": "prohibited",
+            "pools": (None,),
+            "key_fields": ("race_date", "race_number", "market"),
+        },
+    }
+    assert set(registry["endpoints"]) == set(expected) == set(ENDPOINTS)
+    for endpoint_id, contract in expected.items():
+        spec = ENDPOINTS[endpoint_id]
+        assert spec.path == contract["path"]
+        assert spec.response_format == "json"
+        assert spec.pool_param == contract["pool_param"]
+        assert spec.pools == contract["pools"]
+        assert (
+            tuple(field.name for field in spec.business_key_fields)
+            == contract["key_fields"]
+        )
+        assert "totalCount" in spec.pagination
+    selection_1 = ENDPOINTS["api30"].business_key_fields[3]
+    assert selection_1.aliases == ("chulNo", "chulNo1", "hrNo1")
 
 
 def test_business_keys_normalize_aliases_and_ignore_changed_values() -> None:
@@ -779,7 +1118,7 @@ def test_business_keys_normalize_aliases_and_ignore_changed_values() -> None:
         "rcDate": "2021-05-15",
         "rcNo": "01",
         "pool": "tri",
-        "chulNo1": "01",
+        "chulNo": "01",
         "chulNo2": 2,
         "chulNo3": "03",
         "odds": "100.0",
