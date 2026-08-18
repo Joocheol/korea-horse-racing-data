@@ -12,6 +12,7 @@ from .cli import month_range
 from .client import KRAClient, KRAError, sha256_bytes
 from .collect import (
     MAX_CALLS_PER_LOGICAL_REQUEST,
+    business_key_observation,
     canonical_json,
     write_atomic,
 )
@@ -130,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("DATA_GO_KR_SERVICE_KEY is required")
 
     probes: list[dict[str, object]] = []
+    probe_keys: dict[str, dict[str, str]] = {}
     try:
         client = KRAClient(secret)
         for endpoint_id in endpoint_ids:
@@ -145,6 +147,27 @@ def main(argv: list[str] | None = None) -> int:
                 if pool is not None:
                     params["pool"] = pool
                 content, _, envelope = client.get(spec.path, params)
+                if envelope.total_count <= 0 or not envelope.rows:
+                    raise KRAError(
+                        f"business key preflight has no sample row for "
+                        f"{endpoint_id}:{pool}"
+                    )
+                key_hash, observed_aliases = business_key_observation(
+                    spec, envelope.rows[0]
+                )
+                pool_label = str(pool)
+                endpoint_keys = probe_keys.setdefault(endpoint_id, {})
+                if key_hash in endpoint_keys.values():
+                    prior_pool = next(
+                        name
+                        for name, value in endpoint_keys.items()
+                        if value == key_hash
+                    )
+                    raise KRAError(
+                        f"business key preflight collision for {endpoint_id}: "
+                        f"pools {prior_pool} and {pool_label}"
+                    )
+                endpoint_keys[pool_label] = key_hash
                 probes.append(
                     {
                         "endpoint_id": endpoint_id,
@@ -153,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
                         "response_format": envelope.response_format,
                         "total_count": envelope.total_count,
                         "raw_sha256": sha256_bytes(content),
+                        "business_key_sha256": key_hash,
+                        "observed_business_key_aliases": observed_aliases,
                     }
                 )
             budgets[endpoint_id]["approval_status"] = "probe_success"

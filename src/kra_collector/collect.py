@@ -50,8 +50,11 @@ def _normalize_key_value(value: Any, kind: str) -> str:
     raise KRAResponseError(f"unknown business key normalization: {kind}")
 
 
-def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
+def business_key_observation(
+    spec: EndpointSpec, row: dict[str, Any]
+) -> tuple[str, dict[str, list[str]]]:
     key: dict[str, str] = {}
+    observed_aliases: dict[str, list[str]] = {}
     for field in spec.business_key_fields:
         present = [alias for alias in field.aliases if alias in row]
         if not present:
@@ -64,7 +67,12 @@ def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
                 f"business key aliases conflict for {spec.endpoint_id}:{field.name}"
             )
         key[field.name] = values.pop()
-    return sha256_bytes(canonical_json(key))
+        observed_aliases[field.name] = present
+    return sha256_bytes(canonical_json(key)), observed_aliases
+
+
+def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
+    return business_key_observation(spec, row)[0]
 
 
 def collector_contract_hash(spec: EndpointSpec) -> str:

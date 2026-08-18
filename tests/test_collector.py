@@ -636,10 +636,25 @@ class FakePreflightClient:
 
     def get(self, path: str, params: dict[str, object]):
         content = json.dumps({"probe": path, "params": params}, sort_keys=True).encode()
+        base = {"rcDate": "20200104", "rcNo": 1}
+        if path.startswith("API28"):
+            row = {**base, "pool": "WIN", "chulNo": 1}
+        elif path.startswith("API29"):
+            row = {**base, "pool": "QNL", "chulNo1": 1, "chulNo2": 2}
+        elif path.startswith("API30"):
+            row = {
+                **base,
+                "pool": params["pool"],
+                "chulNo1": 1,
+                "chulNo2": 2,
+                "chulNo3": 3,
+            }
+        else:
+            row = {**base, "pool": "WIN"}
         return (
             content,
             "application/json",
-            ParsedEnvelope([], 0, "00", "NORMAL", "json"),
+            ParsedEnvelope([row], 1, "00", "NORMAL", "json"),
         )
 
 
@@ -675,6 +690,47 @@ def test_preflight_reports_tier_used_calls_and_operating_days(
     assert report["budgets"]["api28"]["operating_cap"] == 2500
     assert report["budgets"]["api28"]["estimated_operating_days"] == 1
     assert report["budgets"]["api5"]["approval_status"] == "credential_probe_success"
+    for probe in report["approval_probes"]:
+        assert probe["raw_sha256"]
+        assert probe["business_key_sha256"]
+        assert probe["observed_business_key_aliases"]
+
+
+class MissingBusinessKeyPreflightClient(FakePreflightClient):
+    def get(self, path: str, params: dict[str, object]):
+        content, content_type, _ = super().get(path, params)
+        return (
+            content,
+            content_type,
+            ParsedEnvelope([{"rcDate": "20200104"}], 1, "00", "NORMAL", "json"),
+        )
+
+
+def test_preflight_fails_when_live_row_does_not_support_business_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", "safe-key")
+    monkeypatch.setenv("KRA_QUOTA_LEDGER", str(tmp_path / "quota.jsonl"))
+    monkeypatch.setattr(preflight, "KRAClient", MissingBusinessKeyPreflightClient)
+    output = tmp_path / "preflight.json"
+    assert (
+        preflight.main(
+            [
+                "--start",
+                "2020-01",
+                "--end",
+                "2020-01",
+                "--meets",
+                "1",
+                "--endpoints",
+                "api28",
+                "--output",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
 
 
 def test_artifact_secret_scan_checks_encoded_and_decoded_forms(tmp_path: Path) -> None:
@@ -774,3 +830,6 @@ def test_collection_workflow_has_encrypted_durable_quarantine() -> None:
     assert "actions/upload-artifact" not in workflow
     assert "quota-$(date -u +%F).jsonl.gpg" in workflow
     assert "group: collect-kra-data-go-kr-key" in workflow
+    assert "${ARTIFACT_NAME}.tar.gz.gpg" in workflow
+    assert "${ARTIFACT_NAME}-scan.json" in workflow
+    assert "${ARTIFACT_NAME}-${SCAN_OUTCOME}" not in workflow

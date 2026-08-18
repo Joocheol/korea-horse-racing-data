@@ -23,13 +23,17 @@
 
 모든 실제 호출은 UTC 일자별 quota ledger에 먼저 기록한다. 개발계정 공식 한도
 3,000회의 5/6인 2,500회를 기본 운영상한으로 사용하며, preflight는 이미 쓴 호출,
-자격·승인 probe, 예상 수집 호출과 운영일수를 함께 보고한다.
+자격·승인 probe, 예상 수집 호출과 운영일수를 함께 보고한다. 각 endpoint·pool probe의
+실제 첫 행으로 business key alias를 계산할 수 있어야만 수집을 허용하고, 관측 alias,
+business-key SHA-256, 원응답 SHA-256을 preflight 보고서에 남긴다.
 
 원응답은 공개 Actions artifact에 올리지 않고 AES-256 대칭암호화해
 `kra-private-archive` draft release에만 보존한다. secret scan이 실패한 실행도 같은
 비공개 암호화 경로에 quarantine하며 공개 산출물은 만들지 않는다. 이 draft release는
-공개해서는 안 된다. 자동 재개는 secret scan을 통과한 `*-success.tar.gz.gpg`만
-복호화하며 `*-failure.tar.gz.gpg` quarantine은 수동 조사 전 재사용하지 않는다.
+공개해서는 안 된다. 수집 직후 고정된 `<snapshot>.tar.gz.gpg` 이름으로 중단 복구용
+체크포인트와 당일 quota ledger를 먼저 갱신하고, 별도 `<snapshot>-scan.json`에
+`interrupted`, `success`, `failure` 판정을 기록한다. `failure` quarantine은 수동 조사 전
+자동 복원하지 않으며, `interrupted` 체크포인트는 다음 실행에서 복원한 뒤 다시 검사한다.
 
 최초 실행 전 저장소에 두 Actions secret이 필요하다. `kra-collection` environment는
 별도로 교수 승인 게이트를 제공한다.

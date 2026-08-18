@@ -104,13 +104,24 @@ jobs:
               --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
           )"
           asset_id=""
+          scan_asset_id=""
           if [ -n "$release_id" ]; then
             asset_id="$(
               gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
-                --jq "map(select(.name == \"${ARTIFACT_NAME}-success.tar.gz.gpg\")) | last | .id // empty"
+                --jq "map(select(.name == \"${ARTIFACT_NAME}.tar.gz.gpg\")) | last | .id // empty"
+            )"
+            scan_asset_id="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+                --jq "map(select(.name == \"${ARTIFACT_NAME}-scan.json\")) | last | .id // empty"
             )"
           fi
-          if [ -n "$asset_id" ]; then
+          scan_outcome="interrupted"
+          if [ -n "$scan_asset_id" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${scan_asset_id}" \
+              -H 'Accept: application/octet-stream' > /tmp/kra-scan.json
+            scan_outcome="$(jq -r '.outcome // "interrupted"' /tmp/kra-scan.json)"
+          fi
+          if [ -n "$asset_id" ] && [ "$scan_outcome" != "failure" ]; then
             umask 077
             printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
             gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
@@ -121,6 +132,9 @@ jobs:
               --decrypt /tmp/kra-resume.tar.gz.gpg
             tar -xzf /tmp/kra-resume.tar.gz -C "$OUTPUT_ROOT"
             echo "restored_durable_asset_id=$asset_id"
+            echo "restored_scan_outcome=$scan_outcome"
+          elif [ "$scan_outcome" = "failure" ]; then
+            echo "prior_archive_quarantined=true"
           else
             echo "no_prior_artifact=true"
           fi
@@ -187,6 +201,46 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Persist encrypted interruption checkpoint and quota ledger
+        if: always()
+        env:
+          ARCHIVE_TAG: kra-private-archive
+        run: |
+          if [ ! -d "$OUTPUT_ROOT" ]; then
+            echo "nothing_to_checkpoint=true"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+          archive_name="${ARTIFACT_NAME}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-scan.json"
+          tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file /tmp/kra-archive-passphrase \
+            --cipher-algo AES256 \
+            --output "/tmp/${archive_name}" \
+            --symmetric /tmp/kra-snapshot.tar.gz
+          printf '{"outcome":"interrupted"}\n' > "/tmp/${scan_name}"
+
+          if ! gh release view "$ARCHIVE_TAG" >/dev/null 2>&1; then
+            gh release create "$ARCHIVE_TAG" --draft \
+              --title 'Private encrypted KRA raw archives' \
+              --notes 'Draft release: encrypted resumable snapshots and quarantines. Never publish this release.'
+          fi
+          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
+          gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
+          if [ -f "$KRA_QUOTA_LEDGER" ]; then
+            quota_name="quota-$(date -u +%F).jsonl.gpg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --cipher-algo AES256 \
+              --output "/tmp/${quota_name}" \
+              --symmetric "$KRA_QUOTA_LEDGER"
+            gh release upload "$ARCHIVE_TAG" "/tmp/${quota_name}" --clobber
+            echo "checkpointed_quota_ledger=${quota_name}"
+          fi
+          echo "interruption_checkpoint=${archive_name}"
+
       - name: Verify raw pages, terminal probes, normalized rows, and hashes
         id: verify
         run: |
@@ -207,7 +261,7 @@ jobs:
           --root "$OUTPUT_ROOT"
           --report "$OUTPUT_ROOT/reports/secret-scan-${SNAPSHOT_ID}.json"
 
-      - name: Persist an encrypted durable archive or private quarantine
+      - name: Refresh encrypted archive and record scan verdict
         if: always()
         env:
           SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
@@ -219,19 +273,23 @@ jobs:
           fi
           umask 077
           printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
-          archive_name="${ARTIFACT_NAME}-${SCAN_OUTCOME}.tar.gz.gpg"
+          archive_name="${ARTIFACT_NAME}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-scan.json"
           tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file /tmp/kra-archive-passphrase \
             --cipher-algo AES256 \
             --output "/tmp/${archive_name}" \
             --symmetric /tmp/kra-snapshot.tar.gz
+          printf '{"outcome":"%s"}\n' "$SCAN_OUTCOME" > "/tmp/${scan_name}"
 
           if ! gh release view "$ARCHIVE_TAG" >/dev/null 2>&1; then
             gh release create "$ARCHIVE_TAG" --draft \
               --title 'Private encrypted KRA raw archives' \
               --notes 'Draft release: encrypted resumable snapshots and quarantines. Never publish this release.'
           fi
+          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
+          gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
           if [ -f "$KRA_QUOTA_LEDGER" ]; then
             quota_name="quota-$(date -u +%F).jsonl.gpg"
             gpg --batch --yes --pinentry-mode loopback \
@@ -242,7 +300,6 @@ jobs:
             gh release upload "$ARCHIVE_TAG" "/tmp/${quota_name}" --clobber
             echo "durable_quota_ledger=${quota_name}"
           fi
-          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
           echo "durable_archive=${archive_name}"
 
       - name: Open a baseline PR with license-safe manifests and reports
