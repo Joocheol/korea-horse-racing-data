@@ -1,0 +1,94 @@
+{
+  "schema_version": "2",
+  "credential_probe": {
+    "endpoint_id": "api5",
+    "service": "API5",
+    "operation": "quinellaOddsInfo",
+    "response_format": "xml",
+    "required_params": ["meet", "rc_date", "rc_no", "pageNo", "numOfRows", "_type"]
+  },
+  "endpoints": {
+    "api28": {
+      "service": "API28_1",
+      "operation": "singlePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
+      "pool_param": "prohibited",
+      "market_codes": [null],
+      "business_key_fields": [
+        {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
+        {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
+        {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo"]}
+      ]
+    },
+    "api29": {
+      "service": "API29_1",
+      "operation": "doublePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
+      "pool_param": "prohibited",
+      "market_codes": [null],
+      "business_key_fields": [
+        {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
+        {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
+        {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo1"]},
+        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2"]}
+      ]
+    },
+    "api30": {
+      "service": "API30_1",
+      "operation": "triplePredictionRateInfo_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pool", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
+      "pool_param": "required",
+      "market_codes": ["TLA", "TRI"],
+      "business_key_fields": [
+        {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
+        {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
+        {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]},
+        {"name": "selection_1", "kind": "integer", "aliases": ["chulNo"]},
+        {"name": "selection_2", "kind": "integer", "aliases": ["chulNo2"]},
+        {"name": "selection_3", "kind": "integer", "aliases": ["chulNo3"]}
+      ]
+    },
+    "api179": {
+      "service": "API179_1",
+      "operation": "salesAndDividendRate_1",
+      "collection_grain": "month",
+      "response_format": "json",
+      "success_codes": ["00", "0000", "NORMAL_CODE", "NORMAL SERVICE."],
+      "required_params": ["meet", "rc_month", "pageNo", "numOfRows", "_type"],
+      "optional_params": [],
+      "response_root": "response.body.items.item",
+      "pagination": "pageNo+numOfRows+totalCount+terminal_empty_page",
+      "terminal_probe_total_count": "echoed_or_zero",
+      "pool_param": "prohibited",
+      "market_codes": [null],
+      "business_key_fields": [
+        {"name": "race_date", "kind": "date", "aliases": ["rcDate", "rc_date"]},
+        {"name": "race_number", "kind": "integer", "aliases": ["rcNo", "rc_no"]},
+        {"name": "market", "kind": "text", "aliases": ["pool", "poolName"]}
+      ]
+    }
+  }
+}

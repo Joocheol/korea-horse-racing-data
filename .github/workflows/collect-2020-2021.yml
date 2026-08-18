@@ -1,0 +1,380 @@
+name: Collect KRA data with approval and resume
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: First month (YYYY-MM)
+        required: true
+        default: '2020-01'
+      end:
+        description: Last month (YYYY-MM)
+        required: true
+        default: '2021-12'
+      meets:
+        description: Comma-separated meet codes
+        required: true
+        default: '1,2,3'
+      endpoints:
+        description: Comma-separated registry IDs
+        required: true
+        default: 'api28,api29,api30,api179'
+      page_size:
+        description: Requested rows per page
+        required: true
+        default: '100000'
+      snapshot_id:
+        description: Stable 1-80 character ID reused for resume
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: collect-kra-data-go-kr-key
+  cancel-in-progress: false
+
+jobs:
+  collect-verify-persist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    environment: kra-collection
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      statuses: write
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      KRA_ARCHIVE_PASSPHRASE: ${{ secrets.KRA_ARCHIVE_PASSPHRASE }}
+      DATA_GO_KR_KEY_ID: data-go-kr-service-key
+      SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+      OUTPUT_ROOT: artifacts/kra-collection
+      ARTIFACT_NAME: kra-${{ inputs.snapshot_id }}
+      GH_TOKEN: ${{ github.token }}
+      INPUT_START: ${{ inputs.start }}
+      INPUT_END: ${{ inputs.end }}
+      INPUT_MEETS: ${{ inputs.meets }}
+      INPUT_ENDPOINTS: ${{ inputs.endpoints }}
+      INPUT_PAGE_SIZE: ${{ inputs.page_size }}
+      PYTHONPATH: src
+      KRA_QUOTA_LEDGER: artifacts/kra-collection/quota/usage.jsonl
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+
+      - name: Validate dispatch inputs
+        run: |
+          python - <<'PY'
+          import os, re
+          from kra_collector.cli import month_range
+
+          if os.environ.get("GITHUB_ACTOR") != "Joocheol":
+              raise SystemExit("only the repository owner may approve a collection run")
+          if not os.environ.get("KRA_ARCHIVE_PASSPHRASE"):
+              raise SystemExit("KRA_ARCHIVE_PASSPHRASE is required for durable encrypted storage")
+          value = os.environ["SNAPSHOT_ID"]
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", value):
+              raise SystemExit("invalid snapshot_id")
+          start, end = os.environ["INPUT_START"], os.environ["INPUT_END"]
+          if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", start) or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", end):
+              raise SystemExit("invalid month input")
+          month_range(start, end)
+          if not re.fullmatch(r"[123](,[123])*", os.environ["INPUT_MEETS"]):
+              raise SystemExit("invalid meets input")
+          endpoints = os.environ["INPUT_ENDPOINTS"].split(",")
+          if not endpoints or any(item not in {"api28", "api29", "api30", "api179"} for item in endpoints):
+              raise SystemExit("invalid endpoints input")
+          page_size = os.environ["INPUT_PAGE_SIZE"]
+          if page_size != "100000":
+              raise SystemExit("page_size must remain at the frozen value 100000")
+          PY
+
+      - name: Restore the newest partial artifact for this snapshot
+        run: |
+          mkdir -p "$OUTPUT_ROOT"
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
+          )"
+          asset_id=""
+          asset_name=""
+          scan_outcome="interrupted"
+          if [ -n "$release_id" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+              > /tmp/kra-assets.json
+            while IFS=$'\t' read -r candidate_id candidate_name; do
+              stem="${candidate_name%.tar.gz.gpg}"
+              scan_name="${stem}-scan.json"
+              scan_asset_id="$(
+                jq -r --arg name "$scan_name" \
+                  'map(select(.name == $name)) | last | .id // empty' \
+                  /tmp/kra-assets.json
+              )"
+              candidate_outcome="unknown"
+              if [ -n "$scan_asset_id" ]; then
+                gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${scan_asset_id}" \
+                  -H 'Accept: application/octet-stream' > /tmp/kra-scan.json
+                candidate_outcome="$(jq -r '.outcome // "unknown"' /tmp/kra-scan.json)"
+              fi
+              if [ "$candidate_outcome" = "success" ] || [ "$candidate_outcome" = "interrupted" ]; then
+                asset_id="$candidate_id"
+                asset_name="$candidate_name"
+                scan_outcome="$candidate_outcome"
+                break
+              fi
+            done < <(
+              jq -r --arg prefix "${ARTIFACT_NAME}-run-" '
+                map(select(.name | startswith($prefix))
+                    | select(.name | endswith(".tar.gz.gpg")))
+                | sort_by(.created_at) | reverse | .[] | [.id, .name] | @tsv
+              ' /tmp/kra-assets.json
+            )
+          fi
+          if [ -n "$asset_id" ]; then
+            umask 077
+            printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              -H 'Accept: application/octet-stream' > /tmp/kra-resume.tar.gz.gpg
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --output /tmp/kra-resume.tar.gz \
+              --decrypt /tmp/kra-resume.tar.gz.gpg
+            tar -xzf /tmp/kra-resume.tar.gz -C "$OUTPUT_ROOT"
+            echo "restored_durable_asset_id=$asset_id"
+            echo "restored_durable_asset_name=$asset_name"
+            echo "restored_scan_outcome=$scan_outcome"
+          else
+            echo "no_prior_artifact=true"
+          fi
+
+      - name: Restore the shared UTC-day quota ledger
+        run: |
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
+          )"
+          quota_date="$(date -u +%F)"
+          asset_id=""
+          if [ -n "$release_id" ]; then
+            asset_id="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+                --jq "map(select(.name | startswith(\"quota-${quota_date}-\"))) | sort_by(.created_at) | last | .id // empty"
+            )"
+          fi
+          if [ -n "$asset_id" ]; then
+            umask 077
+            printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              -H 'Accept: application/octet-stream' > /tmp/kra-quota.jsonl.gpg
+            mkdir -p "$(dirname "$KRA_QUOTA_LEDGER")"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --output /tmp/kra-restored-quota.jsonl --decrypt /tmp/kra-quota.jsonl.gpg
+            touch "$KRA_QUOTA_LEDGER"
+            sort -u "$KRA_QUOTA_LEDGER" /tmp/kra-restored-quota.jsonl \
+              > /tmp/kra-merged-quota.jsonl
+            mv /tmp/kra-merged-quota.jsonl "$KRA_QUOTA_LEDGER"
+            echo "restored_quota_asset_id=$asset_id"
+          else
+            echo "no_shared_quota_ledger=true"
+          fi
+
+      - name: Build zero-cost request plan
+        run: >-
+          PYTHONPATH=src python -m kra_collector
+          --start "$INPUT_START" --end "$INPUT_END"
+          --meets "$INPUT_MEETS"
+          --endpoints "$INPUT_ENDPOINTS"
+          --page-size "$INPUT_PAGE_SIZE"
+          --plan-output "$OUTPUT_ROOT/preflight/request-plan.json"
+          --dry-run
+
+      - name: Probe credential, endpoint approval, and quota budget
+        run: >-
+          PYTHONPATH=src python -m kra_collector.preflight
+          --start "$INPUT_START" --end "$INPUT_END"
+          --meets "$INPUT_MEETS"
+          --endpoints "$INPUT_ENDPOINTS"
+          --page-size "$INPUT_PAGE_SIZE"
+          --output "$OUTPUT_ROOT/preflight/preflight.json"
+
+      - name: Collect or resume the snapshot
+        id: collect
+        run: |
+          set +e
+          PYTHONPATH=src python -m kra_collector \
+            --start "$INPUT_START" --end "$INPUT_END" \
+            --meets "$INPUT_MEETS" \
+            --endpoints "$INPUT_ENDPOINTS" \
+            --page-size "$INPUT_PAGE_SIZE" \
+            --snapshot-id "$SNAPSHOT_ID" \
+            --output "$OUTPUT_ROOT"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Persist encrypted interruption checkpoint and quota ledger
+        if: always()
+        env:
+          ARCHIVE_TAG: kra-private-archive
+        run: |
+          if [ ! -d "$OUTPUT_ROOT" ]; then
+            echo "nothing_to_checkpoint=true"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+          archive_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json"
+          tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file /tmp/kra-archive-passphrase \
+            --cipher-algo AES256 \
+            --output "/tmp/${archive_name}" \
+            --symmetric /tmp/kra-snapshot.tar.gz
+          printf '{"outcome":"interrupted"}\n' > "/tmp/${scan_name}"
+
+          if ! gh release view "$ARCHIVE_TAG" >/dev/null 2>&1; then
+            gh release create "$ARCHIVE_TAG" --draft \
+              --title 'Private encrypted KRA raw archives' \
+              --notes 'Draft release: encrypted resumable snapshots and quarantines. Never publish this release.'
+          fi
+          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
+          gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
+          if [ -f "$KRA_QUOTA_LEDGER" ]; then
+            quota_name="quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --cipher-algo AES256 \
+              --output "/tmp/${quota_name}" \
+              --symmetric "$KRA_QUOTA_LEDGER"
+            gh release upload "$ARCHIVE_TAG" "/tmp/${quota_name}" --clobber
+            echo "checkpointed_quota_ledger=${quota_name}"
+          fi
+          echo "interruption_checkpoint=${archive_name}"
+
+      - name: Verify raw pages, terminal probes, normalized rows, and hashes
+        id: verify
+        run: |
+          set +e
+          PYTHONPATH=src python -m kra_collector.verify \
+            --root "$OUTPUT_ROOT" --snapshot-id "$SNAPSHOT_ID" \
+            --start "$INPUT_START" --end "$INPUT_END" \
+            --meets "$INPUT_MEETS" \
+            --endpoints "$INPUT_ENDPOINTS"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Scan all artifacts for raw and encoded secret variants
+        id: secret_scan
+        run: >-
+          PYTHONPATH=src python -m kra_collector.scan
+          --root "$OUTPUT_ROOT"
+          --report "$OUTPUT_ROOT/reports/secret-scan-${SNAPSHOT_ID}.json"
+
+      - name: Refresh encrypted archive and record scan verdict
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
+          ARCHIVE_TAG: kra-private-archive
+        run: |
+          if [ ! -d "$OUTPUT_ROOT" ]; then
+            echo "nothing_to_archive=true"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+          archive_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}.tar.gz.gpg"
+          scan_name="${ARTIFACT_NAME}-run-${GITHUB_RUN_ID}-scan.json"
+          tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file /tmp/kra-archive-passphrase \
+            --cipher-algo AES256 \
+            --output "/tmp/${archive_name}" \
+            --symmetric /tmp/kra-snapshot.tar.gz
+          printf '{"outcome":"%s"}\n' "$SCAN_OUTCOME" > "/tmp/${scan_name}"
+
+          if ! gh release view "$ARCHIVE_TAG" >/dev/null 2>&1; then
+            gh release create "$ARCHIVE_TAG" --draft \
+              --title 'Private encrypted KRA raw archives' \
+              --notes 'Draft release: encrypted resumable snapshots and quarantines. Never publish this release.'
+          fi
+          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
+          gh release upload "$ARCHIVE_TAG" "/tmp/${scan_name}" --clobber
+          if [ -f "$KRA_QUOTA_LEDGER" ]; then
+            quota_name="quota-$(date -u +%F)-${GITHUB_RUN_ID}.jsonl.gpg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --cipher-algo AES256 \
+              --output "/tmp/${quota_name}" \
+              --symmetric "$KRA_QUOTA_LEDGER"
+            gh release upload "$ARCHIVE_TAG" "/tmp/${quota_name}" --clobber
+            echo "durable_quota_ledger=${quota_name}"
+          fi
+          echo "durable_archive=${archive_name}"
+
+      - name: Open a baseline PR with license-safe manifests and reports
+        if: steps.collect.outputs.exit_code == '0' && steps.verify.outputs.exit_code == '0' && github.ref_name == 'main'
+        env:
+          BASE_BRANCH: main
+        run: |
+          branch="data/snapshot-${SNAPSHOT_ID}-${GITHUB_RUN_ID}"
+          base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_BRANCH}" --jq .object.sha)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${branch}" -f sha="$base_sha"
+
+          put_file() {
+            local repository_path="$1"
+            local source_path="$2"
+            local encoded existing_sha
+            encoded="$(base64 -w0 "$source_path")"
+            existing_sha="$(
+              gh api "repos/${GITHUB_REPOSITORY}/contents/${repository_path}?ref=${branch}" \
+                --jq '.sha' 2>/dev/null || true
+            )"
+            args=(--method PUT "repos/${GITHUB_REPOSITORY}/contents/${repository_path}"
+                  -f message="Record verified KRA snapshot ${SNAPSHOT_ID}"
+                  -f content="$encoded" -f branch="$branch")
+            if [ -n "$existing_sha" ]; then args+=(-f sha="$existing_sha"); fi
+            gh api "${args[@]}" >/dev/null
+          }
+
+          put_file "manifests/manifest-${SNAPSHOT_ID}.jsonl" \
+            "$OUTPUT_ROOT/manifests/manifest-${SNAPSHOT_ID}.jsonl"
+          put_file "reports/quality-${SNAPSHOT_ID}.json" \
+            "$OUTPUT_ROOT/reports/quality-${SNAPSHOT_ID}.json"
+          put_file "reports/preflight-${SNAPSHOT_ID}.json" \
+            "$OUTPUT_ROOT/preflight/preflight.json"
+
+          pr_url="$(gh pr create --base "$BASE_BRANCH" --head "$branch" \
+            --title "Record verified KRA snapshot ${SNAPSHOT_ID}" \
+            --body "Verified transport-level manifest and quality report. Raw responses remain outside Git in the encrypted private draft-release archive. Full pilot promotion remains false until the quality report's unrun gates are completed. The private archive must never be published.")"
+
+          pr_number="${pr_url##*/}"
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq .object.sha)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head_sha}" \
+            -f state=pending \
+            -f context='Collector CI' \
+            -f description='Explicit snapshot CI dispatch queued'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${head_sha}" \
+            -f state=pending \
+            -f context='Claude collected-data report review' \
+            -f description='Explicit artifact review dispatch queued'
+          gh workflow run ci.yml --ref "$BASE_BRANCH" -f head_sha="$head_sha"
+          gh workflow run claude-data-review.yml --ref "$BASE_BRANCH" \
+            -f pr_number="$pr_number" -f head_sha="$head_sha"
+
+      - name: Enforce collection and verification result
+        if: always()
+        run: |
+          test "${{ steps.collect.outputs.exit_code }}" = "0"
+          test "${{ steps.verify.outputs.exit_code }}" = "0"
+          test "${{ steps.secret_scan.outcome }}" = "success"
