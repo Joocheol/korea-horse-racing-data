@@ -6,6 +6,13 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class BusinessKeyField:
+    name: str
+    kind: str
+    aliases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class EndpointSpec:
     endpoint_id: str
     service: str
@@ -19,6 +26,7 @@ class EndpointSpec:
     pagination: str
     pool_param: str
     pools: tuple[str | None, ...]
+    business_key_fields: tuple[BusinessKeyField, ...]
 
     @property
     def path(self) -> str:
@@ -30,7 +38,7 @@ def _load_registry() -> dict[str, EndpointSpec]:
     # keeping the runtime dependency-free and parser behavior deterministic.
     path = Path(__file__).resolve().parents[2] / "config" / "endpoints.yml"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != "1":
+    if payload.get("schema_version") != "2":
         raise RuntimeError("unsupported endpoint registry schema")
     specs: dict[str, EndpointSpec] = {}
     for endpoint_id, item in payload["endpoints"].items():
@@ -47,6 +55,14 @@ def _load_registry() -> dict[str, EndpointSpec]:
             pagination=item["pagination"],
             pool_param=item["pool_param"],
             pools=tuple(item["market_codes"]),
+            business_key_fields=tuple(
+                BusinessKeyField(
+                    name=field["name"],
+                    kind=field["kind"],
+                    aliases=tuple(field["aliases"]),
+                )
+                for field in item["business_key_fields"]
+            ),
         )
         if spec.response_format != "json" or spec.pool_param not in {
             "required",

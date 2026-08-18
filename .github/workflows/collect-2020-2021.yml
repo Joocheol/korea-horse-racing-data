@@ -30,7 +30,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: collect-kra-${{ inputs.snapshot_id }}
+  group: collect-kra-data-go-kr-key
   cancel-in-progress: false
 
 jobs:
@@ -45,6 +45,7 @@ jobs:
       statuses: write
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      KRA_ARCHIVE_PASSPHRASE: ${{ secrets.KRA_ARCHIVE_PASSPHRASE }}
       DATA_GO_KR_KEY_ID: data-go-kr-service-key
       SNAPSHOT_ID: ${{ inputs.snapshot_id }}
       OUTPUT_ROOT: artifacts/kra-collection
@@ -56,7 +57,7 @@ jobs:
       INPUT_ENDPOINTS: ${{ inputs.endpoints }}
       INPUT_PAGE_SIZE: ${{ inputs.page_size }}
       PYTHONPATH: src
-      PYTHONUNBUFFERED: '1'
+      KRA_QUOTA_LEDGER: artifacts/kra-collection/quota/usage.jsonl
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -76,6 +77,8 @@ jobs:
 
           if os.environ.get("GITHUB_ACTOR") != "Joocheol":
               raise SystemExit("only the repository owner may approve a collection run")
+          if not os.environ.get("KRA_ARCHIVE_PASSPHRASE"):
+              raise SystemExit("KRA_ARCHIVE_PASSPHRASE is required for durable encrypted storage")
           value = os.environ["SNAPSHOT_ID"]
           if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", value):
               raise SystemExit("invalid snapshot_id")
@@ -96,16 +99,58 @@ jobs:
       - name: Restore the newest partial artifact for this snapshot
         run: |
           mkdir -p "$OUTPUT_ROOT"
-          artifact_id="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100" \
-              --jq '.artifacts | map(select(.expired | not)) | sort_by(.created_at) | last | .id // empty'
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
           )"
-          if [ -n "$artifact_id" ]; then
-            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/kra-resume.zip
-            unzip -oq /tmp/kra-resume.zip -d "$OUTPUT_ROOT"
-            echo "restored_artifact_id=$artifact_id"
+          asset_id=""
+          if [ -n "$release_id" ]; then
+            asset_id="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+                --jq "map(select(.name == \"${ARTIFACT_NAME}-success.tar.gz.gpg\")) | last | .id // empty"
+            )"
+          fi
+          if [ -n "$asset_id" ]; then
+            umask 077
+            printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              -H 'Accept: application/octet-stream' > /tmp/kra-resume.tar.gz.gpg
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --output /tmp/kra-resume.tar.gz \
+              --decrypt /tmp/kra-resume.tar.gz.gpg
+            tar -xzf /tmp/kra-resume.tar.gz -C "$OUTPUT_ROOT"
+            echo "restored_durable_asset_id=$asset_id"
           else
             echo "no_prior_artifact=true"
+          fi
+
+      - name: Restore the shared UTC-day quota ledger
+        run: |
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == "kra-private-archive" and .draft) | .id' | head -1
+          )"
+          quota_date="$(date -u +%F)"
+          asset_id=""
+          if [ -n "$release_id" ]; then
+            asset_id="$(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+                --jq "map(select(.name | startswith(\"quota-${quota_date}.\"))) | sort_by(.created_at) | last | .id // empty"
+            )"
+          fi
+          if [ -n "$asset_id" ]; then
+            umask 077
+            printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              -H 'Accept: application/octet-stream' > /tmp/kra-quota.jsonl.gpg
+            mkdir -p "$(dirname "$KRA_QUOTA_LEDGER")"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --output "$KRA_QUOTA_LEDGER" --decrypt /tmp/kra-quota.jsonl.gpg
+            echo "restored_quota_asset_id=$asset_id"
+          else
+            echo "no_shared_quota_ledger=true"
           fi
 
       - name: Build zero-cost request plan
@@ -157,16 +202,48 @@ jobs:
 
       - name: Scan all artifacts for raw and encoded secret variants
         id: secret_scan
-        run: PYTHONPATH=src python -m kra_collector.scan --root "$OUTPUT_ROOT"
+        run: >-
+          PYTHONPATH=src python -m kra_collector.scan
+          --root "$OUTPUT_ROOT"
+          --report "$OUTPUT_ROOT/reports/secret-scan-${SNAPSHOT_ID}.json"
 
-      - name: Upload resumable snapshot even when collection is incomplete
-        if: always() && steps.secret_scan.outcome == 'success'
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
-        with:
-          name: kra-${{ inputs.snapshot_id }}
-          path: artifacts/kra-collection
-          if-no-files-found: error
-          retention-days: 90
+      - name: Persist an encrypted durable archive or private quarantine
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
+          ARCHIVE_TAG: kra-private-archive
+        run: |
+          if [ ! -d "$OUTPUT_ROOT" ]; then
+            echo "nothing_to_archive=true"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KRA_ARCHIVE_PASSPHRASE" > /tmp/kra-archive-passphrase
+          archive_name="${ARTIFACT_NAME}-${SCAN_OUTCOME}.tar.gz.gpg"
+          tar -C "$OUTPUT_ROOT" -czf /tmp/kra-snapshot.tar.gz .
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file /tmp/kra-archive-passphrase \
+            --cipher-algo AES256 \
+            --output "/tmp/${archive_name}" \
+            --symmetric /tmp/kra-snapshot.tar.gz
+
+          if ! gh release view "$ARCHIVE_TAG" >/dev/null 2>&1; then
+            gh release create "$ARCHIVE_TAG" --draft \
+              --title 'Private encrypted KRA raw archives' \
+              --notes 'Draft release: encrypted resumable snapshots and quarantines. Never publish this release.'
+          fi
+          if [ -f "$KRA_QUOTA_LEDGER" ]; then
+            quota_name="quota-$(date -u +%F).jsonl.gpg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file /tmp/kra-archive-passphrase \
+              --cipher-algo AES256 \
+              --output "/tmp/${quota_name}" \
+              --symmetric "$KRA_QUOTA_LEDGER"
+            gh release upload "$ARCHIVE_TAG" "/tmp/${quota_name}" --clobber
+            echo "durable_quota_ledger=${quota_name}"
+          fi
+          gh release upload "$ARCHIVE_TAG" "/tmp/${archive_name}" --clobber
+          echo "durable_archive=${archive_name}"
 
       - name: Open a baseline PR with license-safe manifests and reports
         if: steps.collect.outputs.exit_code == '0' && steps.verify.outputs.exit_code == '0' && github.ref_name == 'main'
@@ -203,7 +280,7 @@ jobs:
 
           pr_url="$(gh pr create --base "$BASE_BRANCH" --head "$branch" \
             --title "Record verified KRA snapshot ${SNAPSHOT_ID}" \
-            --body "Verified transport-level manifest and quality report. Raw responses remain outside Git pending the data-license gate. Full pilot promotion remains false until the quality report's unrun gates are completed. Raw response artifacts have 90-day retention; approval must not outlive their reproducibility window.")"
+            --body "Verified transport-level manifest and quality report. Raw responses remain outside Git in the encrypted private draft-release archive. Full pilot promotion remains false until the quality report's unrun gates are completed. The private archive must never be published.")"
 
           pr_number="${pr_url##*/}"
           head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq .object.sha)"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import os
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
@@ -10,8 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .client import KRAClient, KRAResponseError, sha256_bytes
+from .client import KRAClient, KRAResponseError, parse_envelope, sha256_bytes
 from .registry import EndpointSpec
+
+COLLECTOR_SCHEMA_VERSION = "2"
+MAX_CALLS_PER_LOGICAL_REQUEST = 3
 
 
 def canonical_json(value: Any) -> bytes:
@@ -23,6 +27,62 @@ def canonical_json(value: Any) -> bytes:
 def request_id(endpoint_id: str, params_without_key: dict[str, Any]) -> str:
     payload = {"endpoint_id": endpoint_id, "params": params_without_key}
     return hashlib.sha256(canonical_json(payload)).hexdigest()
+
+
+def _normalize_key_value(value: Any, kind: str) -> str:
+    text = str(value).strip()
+    if kind == "integer":
+        try:
+            return str(int(text))
+        except ValueError as exc:
+            raise KRAResponseError(
+                f"business key integer is invalid: {text!r}"
+            ) from exc
+    if kind == "date":
+        digits = text.replace("-", "")
+        if len(digits) != 8 or not digits.isdigit():
+            raise KRAResponseError(f"business key date is invalid: {text!r}")
+        return digits
+    if kind == "text":
+        if not text:
+            raise KRAResponseError("business key text is empty")
+        return text.upper()
+    raise KRAResponseError(f"unknown business key normalization: {kind}")
+
+
+def business_key_hash(spec: EndpointSpec, row: dict[str, Any]) -> str:
+    key: dict[str, str] = {}
+    for field in spec.business_key_fields:
+        present = [alias for alias in field.aliases if alias in row]
+        if not present:
+            raise KRAResponseError(
+                f"business key field {field.name} missing for {spec.endpoint_id}"
+            )
+        values = {_normalize_key_value(row[alias], field.kind) for alias in present}
+        if len(values) != 1:
+            raise KRAResponseError(
+                f"business key aliases conflict for {spec.endpoint_id}:{field.name}"
+            )
+        key[field.name] = values.pop()
+    return sha256_bytes(canonical_json(key))
+
+
+def collector_contract_hash(spec: EndpointSpec) -> str:
+    return sha256_bytes(
+        canonical_json(
+            {
+                "collector_schema_version": COLLECTOR_SCHEMA_VERSION,
+                "endpoint_spec": asdict(spec),
+                "enforced_gates": ENFORCED_GATES,
+            }
+        )
+    )
+
+
+def required_calls_for_total(total_count: int, page_size: int) -> int:
+    if total_count < 0 or page_size <= 0:
+        raise KRAResponseError("invalid pagination geometry")
+    return max(1, math.ceil(total_count / page_size)) + 1
 
 
 def write_atomic(path: Path, content: bytes) -> None:
@@ -59,6 +119,21 @@ class PageRecord:
 
 
 @dataclass
+class PageLedgerEntry:
+    schema_version: str
+    snapshot_id: str
+    endpoint_id: str
+    request_id: str
+    canonical_params_without_service_key: dict[str, Any]
+    collector_commit: str
+    collector_contract_sha256: str
+    total_count: int
+    kind: str
+    page: dict[str, Any]
+    recorded_at_utc: str
+
+
+@dataclass
 class ManifestRecord:
     schema_version: str
     snapshot_id: str
@@ -81,14 +156,15 @@ class ManifestRecord:
     verification_gates: dict[str, list[str]]
     collected_at_utc: str
     collector_commit: str
+    collector_contract_sha256: str
     status: str
     resumed: bool = False
 
 
 ENFORCED_GATES = [
     "all_pages_total_count_constant",
-    "page_row_intersection_empty",
-    "deduplicated_union_equals_total_count",
+    "business_key_unique_across_pages",
+    "business_key_union_equals_total_count",
     "terminal_page_empty",
     "raw_sha256_verified",
     "normalized_content_sha256_verified",
@@ -123,6 +199,9 @@ class Collector:
         self.manifest_path = (
             output_dir / "manifests" / f"manifest-{self.snapshot_id}.jsonl"
         )
+        self.page_ledger_path = (
+            output_dir / "ledgers" / f"pages-{self.snapshot_id}.jsonl"
+        )
         self.collector_commit = os.environ.get("GITHUB_SHA", "local")
         self._completed = self._load_completed_records()
 
@@ -146,6 +225,7 @@ class Collector:
             data.setdefault("terminal_probe", None)
             data.setdefault("verification_gates", {"enforced": [], "unrun": []})
             data.setdefault("resumed", False)
+            data.setdefault("collector_contract_sha256", "missing")
             record = ManifestRecord(**data)
             if record.status == "complete":
                 completed[
@@ -186,6 +266,151 @@ class Collector:
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
         with self.manifest_path.open("ab") as handle:
             handle.write(canonical_json(asdict(record)) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _append_page_ledger(
+        self,
+        *,
+        spec: EndpointSpec,
+        logical_id: str,
+        base_params: dict[str, Any],
+        expected_total: int,
+        kind: str,
+        page: PageRecord,
+    ) -> None:
+        entry = PageLedgerEntry(
+            schema_version=COLLECTOR_SCHEMA_VERSION,
+            snapshot_id=self.snapshot_id,
+            endpoint_id=spec.endpoint_id,
+            request_id=logical_id,
+            canonical_params_without_service_key=base_params,
+            collector_commit=self.collector_commit,
+            collector_contract_sha256=collector_contract_hash(spec),
+            total_count=expected_total,
+            kind=kind,
+            page=asdict(page),
+            recorded_at_utc=datetime.now(UTC).isoformat(),
+        )
+        self.page_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.page_ledger_path.open("ab") as handle:
+            handle.write(canonical_json(asdict(entry)) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _restore_partial_pages(
+        self,
+        spec: EndpointSpec,
+        logical_id: str,
+        base_params: dict[str, Any],
+    ) -> tuple[
+        list[PageRecord],
+        list[dict[str, Any]],
+        set[str],
+        set[str],
+        int | None,
+        PageRecord | None,
+    ]:
+        if not self.page_ledger_path.exists():
+            return [], [], set(), set(), None, None
+        data_entries: dict[int, PageLedgerEntry] = {}
+        probe_entries: dict[int, PageLedgerEntry] = {}
+        for line in self.page_ledger_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            entry = PageLedgerEntry(**json.loads(line))
+            if entry.request_id != logical_id:
+                continue
+            if (
+                entry.schema_version != COLLECTOR_SCHEMA_VERSION
+                or entry.snapshot_id != self.snapshot_id
+                or entry.endpoint_id != spec.endpoint_id
+                or entry.canonical_params_without_service_key != base_params
+                or entry.collector_contract_sha256 != collector_contract_hash(spec)
+            ):
+                raise KRAResponseError(
+                    "partial page ledger identity differs from the current request; "
+                    "use a new snapshot_id"
+                )
+            page_no = int(entry.page["page_no"])
+            target = data_entries if entry.kind == "data" else probe_entries
+            target[page_no] = entry
+
+        if not data_entries:
+            return [], [], set(), set(), None, None
+        page_numbers = sorted(data_entries)
+        if page_numbers != list(range(1, max(page_numbers) + 1)):
+            raise KRAResponseError("partial page ledger is not contiguous")
+
+        pages: list[PageRecord] = []
+        rows: list[dict[str, Any]] = []
+        seen_rows: set[str] = set()
+        seen_business_keys: set[str] = set()
+        expected_total: int | None = None
+        for page_no in page_numbers:
+            entry = data_entries[page_no]
+            page = PageRecord(**entry.page)
+            raw_path = self.output_dir / page.raw_path
+            if not raw_path.exists():
+                raise KRAResponseError(f"partial raw page is missing: {page_no}")
+            content = raw_path.read_bytes()
+            if sha256_bytes(content) != page.raw_sha256:
+                raise KRAResponseError(f"partial raw page hash differs: {page_no}")
+            envelope = parse_envelope(content, page.content_type, spec.response_format)
+            if envelope.result_code not in spec.success_codes:
+                raise KRAResponseError("partial page result code violates registry")
+            if expected_total is None:
+                expected_total = entry.total_count
+            if (
+                entry.total_count != expected_total
+                or envelope.total_count != expected_total
+                or len(envelope.rows) != page.returned_rows
+            ):
+                raise KRAResponseError("partial page count metadata differs")
+            for row in envelope.rows:
+                row_hash = sha256_bytes(canonical_json(row))
+                row_key = business_key_hash(spec, row)
+                if row_key in seen_business_keys:
+                    raise KRAResponseError(
+                        "partial pages contain a duplicate business key"
+                    )
+                seen_business_keys.add(row_key)
+                seen_rows.add(row_hash)
+                rows.append(row)
+            pages.append(page)
+
+        if expected_total is None or len(rows) > expected_total:
+            raise KRAResponseError("partial page ledger exceeds totalCount")
+        if len(rows) < expected_total and pages[-1].returned_rows == 0:
+            raise KRAResponseError("partial page ledger ends empty before totalCount")
+
+        terminal_probe: PageRecord | None = None
+        expected_probe_page = len(pages) + 1
+        if expected_probe_page in probe_entries:
+            entry = probe_entries[expected_probe_page]
+            page = PageRecord(**entry.page)
+            probe_path = self.output_dir / page.raw_path
+            if not probe_path.exists():
+                raise KRAResponseError("partial terminal probe is missing")
+            content = probe_path.read_bytes()
+            if sha256_bytes(content) != page.raw_sha256:
+                raise KRAResponseError("partial terminal probe hash differs")
+            envelope = parse_envelope(content, page.content_type, spec.response_format)
+            if envelope.rows or envelope.total_count != expected_total:
+                raise KRAResponseError("partial terminal probe is not empty")
+            if len(rows) != expected_total:
+                raise KRAResponseError(
+                    "partial terminal probe precedes complete data pages"
+                )
+            terminal_probe = page
+        return (
+            pages,
+            rows,
+            seen_rows,
+            seen_business_keys,
+            expected_total,
+            terminal_probe,
+        )
 
     def collect_month(
         self,
@@ -213,8 +438,8 @@ class Collector:
         if previous is not None:
             if (
                 previous.request_id != logical_id
-                or previous.schema_version != "1"
-                or previous.collector_commit != self.collector_commit
+                or previous.schema_version != COLLECTOR_SCHEMA_VERSION
+                or previous.collector_contract_sha256 != collector_contract_hash(spec)
             ):
                 raise KRAResponseError(
                     "resume identity differs from the current request or collector; "
@@ -222,13 +447,18 @@ class Collector:
                 )
             if self._record_files_are_valid(previous):
                 return replace(previous, resumed=True)
-        pages: list[PageRecord] = []
-        rows: list[dict[str, Any]] = []
-        seen_rows: set[str] = set()
-        expected_total: int | None = None
-        page_no = 1
+        (
+            pages,
+            rows,
+            seen_rows,
+            seen_business_keys,
+            expected_total,
+            terminal_probe,
+        ) = self._restore_partial_pages(spec, logical_id, base_params)
+        resumed_partial = bool(pages or terminal_probe)
+        page_no = len(pages) + 1
 
-        while True:
+        while expected_total is None or len(rows) < expected_total:
             page_params = {**base_params, "pageNo": page_no}
             if not set(spec.required_params) <= set(page_params):
                 raise KRAResponseError(
@@ -244,6 +474,14 @@ class Collector:
                 )
             if expected_total is None:
                 expected_total = envelope.total_count
+                required_calls = required_calls_for_total(
+                    expected_total, self.page_size
+                )
+                if required_calls > MAX_CALLS_PER_LOGICAL_REQUEST:
+                    raise KRAResponseError(
+                        "logical request exceeds the approved per-request call budget: "
+                        f"{required_calls}>{MAX_CALLS_PER_LOGICAL_REQUEST}"
+                    )
                 if (
                     0 < len(envelope.rows) < expected_total
                     and len(envelope.rows) < self.page_size
@@ -268,25 +506,35 @@ class Collector:
                 / f"page-{page_no:05d}.{envelope.response_format}"
             )
             write_atomic(self.output_dir / raw_relative, content)
-            pages.append(
-                PageRecord(
-                    page_no=page_no,
-                    returned_rows=len(envelope.rows),
-                    raw_path=raw_relative.as_posix(),
-                    raw_sha256=sha256_bytes(content),
-                    content_type=content_type,
-                    response_format=envelope.response_format,
-                )
+            page_record = PageRecord(
+                page_no=page_no,
+                returned_rows=len(envelope.rows),
+                raw_path=raw_relative.as_posix(),
+                raw_sha256=sha256_bytes(content),
+                content_type=content_type,
+                response_format=envelope.response_format,
             )
             for row in envelope.rows:
                 row_hash = sha256_bytes(canonical_json(row))
-                if row_hash in seen_rows:
+                row_key = business_key_hash(spec, row)
+                if row_key in seen_business_keys:
                     raise KRAResponseError(
-                        f"duplicate row across pages for {spec.endpoint_id} meet={meet} "
+                        f"duplicate business key across pages for {spec.endpoint_id} meet={meet} "
                         f"month={year_month} pool={pool} page={page_no}"
                     )
+                seen_business_keys.add(row_key)
                 seen_rows.add(row_hash)
                 rows.append(row)
+
+            pages.append(page_record)
+            self._append_page_ledger(
+                spec=spec,
+                logical_id=logical_id,
+                base_params=base_params,
+                expected_total=expected_total,
+                kind="data",
+                page=page_record,
+            )
 
             if len(rows) >= expected_total:
                 break
@@ -302,46 +550,55 @@ class Collector:
                 f"{len(rows)} != {expected_total}"
             )
 
-        probe_page_no = page_no + 1
-        probe_params = {**base_params, "pageNo": probe_page_no}
-        probe_content, probe_content_type, probe_envelope = self.client.get(
-            spec.path, probe_params
-        )
-        if (
-            probe_envelope.response_format != spec.response_format
-            or probe_envelope.result_code not in spec.success_codes
-        ):
-            raise KRAResponseError(
-                f"terminal response violates endpoint registry for {spec.endpoint_id}"
+        if terminal_probe is None:
+            probe_page_no = len(pages) + 1
+            probe_params = {**base_params, "pageNo": probe_page_no}
+            probe_content, probe_content_type, probe_envelope = self.client.get(
+                spec.path, probe_params
             )
-        if probe_envelope.total_count != expected_total:
-            raise KRAResponseError(
-                f"terminal probe totalCount changed for {spec.endpoint_id}: "
-                f"{expected_total} -> {probe_envelope.total_count}"
+            if (
+                probe_envelope.response_format != spec.response_format
+                or probe_envelope.result_code not in spec.success_codes
+            ):
+                raise KRAResponseError(
+                    f"terminal response violates endpoint registry for {spec.endpoint_id}"
+                )
+            if probe_envelope.total_count != expected_total:
+                raise KRAResponseError(
+                    f"terminal probe totalCount changed for {spec.endpoint_id}: "
+                    f"{expected_total} -> {probe_envelope.total_count}"
+                )
+            if probe_envelope.rows:
+                raise KRAResponseError(
+                    f"terminal page is not empty for {spec.endpoint_id} "
+                    f"meet={meet} month={year_month} pool={pool}"
+                )
+            pool_part = pool or "ALL"
+            probe_relative = (
+                Path("raw")
+                / spec.endpoint_id
+                / str(meet)
+                / year_month
+                / pool_part
+                / f"probe-page-{probe_page_no:05d}.{probe_envelope.response_format}"
             )
-        if probe_envelope.rows:
-            raise KRAResponseError(
-                f"terminal page is not empty for {spec.endpoint_id} "
-                f"meet={meet} month={year_month} pool={pool}"
+            write_atomic(self.output_dir / probe_relative, probe_content)
+            terminal_probe = PageRecord(
+                page_no=probe_page_no,
+                returned_rows=0,
+                raw_path=probe_relative.as_posix(),
+                raw_sha256=sha256_bytes(probe_content),
+                content_type=probe_content_type,
+                response_format=probe_envelope.response_format,
             )
-        pool_part = pool or "ALL"
-        probe_relative = (
-            Path("raw")
-            / spec.endpoint_id
-            / str(meet)
-            / year_month
-            / pool_part
-            / f"probe-page-{probe_page_no:05d}.{probe_envelope.response_format}"
-        )
-        write_atomic(self.output_dir / probe_relative, probe_content)
-        terminal_probe = PageRecord(
-            page_no=probe_page_no,
-            returned_rows=0,
-            raw_path=probe_relative.as_posix(),
-            raw_sha256=sha256_bytes(probe_content),
-            content_type=probe_content_type,
-            response_format=probe_envelope.response_format,
-        )
+            self._append_page_ledger(
+                spec=spec,
+                logical_id=logical_id,
+                base_params=base_params,
+                expected_total=expected_total,
+                kind="probe",
+                page=terminal_probe,
+            )
 
         normalized_relative = (
             Path("normalized")
@@ -354,7 +611,7 @@ class Collector:
             self.output_dir / normalized_relative, rows
         )
         record = ManifestRecord(
-            schema_version="1",
+            schema_version=COLLECTOR_SCHEMA_VERSION,
             snapshot_id=self.snapshot_id,
             key_id=self.key_id,
             endpoint_id=spec.endpoint_id,
@@ -378,7 +635,9 @@ class Collector:
             },
             collected_at_utc=datetime.now(UTC).isoformat(),
             collector_commit=self.collector_commit,
+            collector_contract_sha256=collector_contract_hash(spec),
             status="complete",
+            resumed=resumed_partial,
         )
         self._append_manifest(record)
         self._completed[record_key] = record

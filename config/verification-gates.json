@@ -1,9 +1,9 @@
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "core_transport": [
     "all_pages_total_count_constant",
-    "page_row_intersection_empty",
-    "deduplicated_union_equals_total_count",
+    "business_key_unique_across_pages",
+    "business_key_union_equals_total_count",
     "terminal_page_empty",
     "raw_sha256_verified",
     "normalized_content_sha256_verified"

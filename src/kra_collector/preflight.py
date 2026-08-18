@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .cli import month_range
 from .client import KRAClient, KRAError, sha256_bytes
-from .collect import canonical_json, write_atomic
+from .collect import (
+    MAX_CALLS_PER_LOGICAL_REQUEST,
+    canonical_json,
+    write_atomic,
+)
 from .registry import ENDPOINTS
 
-OFFICIAL_DAILY_LIMIT = 3_000
-DEFAULT_OPERATING_CAP = 2_500  # reserve one sixth for probes and recovery
+OFFICIAL_DEVELOPMENT_DAILY_CAP = 3_000
+DEFAULT_OPERATING_CAP = 2_500
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +32,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _usage_today(path: Path) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    if not path.exists():
+        return counts
+    today = datetime.now(UTC).date().isoformat()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if record.get("utc_date") == today:
+            counts[str(record["endpoint_id"])] += 1
+    return counts
+
+
+def _operating_cap(endpoint_id: str) -> int:
+    return int(
+        os.environ.get(
+            f"DATA_GO_KR_OPERATING_CAP_{endpoint_id.upper()}",
+            DEFAULT_OPERATING_CAP,
+        )
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     months = month_range(args.start, args.end)
@@ -34,26 +64,66 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         raise SystemExit(f"unknown endpoints: {', '.join(unknown)}")
 
-    budgets: dict[str, dict[str, int]] = {}
+    ledger_path = Path(os.environ.get("KRA_QUOTA_LEDGER", "quota/usage-current.jsonl"))
+    used_before = _usage_today(ledger_path)
+    budgets: dict[str, dict[str, int | str]] = {}
     for endpoint_id in endpoint_ids:
         logical = len(ENDPOINTS[endpoint_id].pools) * len(meets) * len(months)
-        conservative = logical * 3
-        cap = DEFAULT_OPERATING_CAP
+        approval_probes = len(ENDPOINTS[endpoint_id].pools)
+        conservative = logical * MAX_CALLS_PER_LOGICAL_REQUEST + approval_probes
+        cap = _operating_cap(endpoint_id)
+        used = used_before[endpoint_id]
         budgets[endpoint_id] = {
+            "account_tier": os.environ.get("DATA_GO_KR_ACCOUNT_TIER", "development"),
+            "production_approval_status": os.environ.get(
+                "DATA_GO_KR_PRODUCTION_APPROVAL_STATUS", "unverified"
+            ),
+            "production_review_lead_time": os.environ.get(
+                "DATA_GO_KR_PRODUCTION_REVIEW_LEAD_TIME", "unverified"
+            ),
+            "official_daily_cap": int(
+                os.environ.get(
+                    f"DATA_GO_KR_DAILY_CAP_{endpoint_id.upper()}",
+                    OFFICIAL_DEVELOPMENT_DAILY_CAP,
+                )
+            ),
             "logical_requests": logical,
+            "approval_probe_requests": approval_probes,
             "conservative_requests": conservative,
-            "official_daily_limit": OFFICIAL_DAILY_LIMIT,
             "operating_cap": cap,
-            "account_tier": "development",
-            "production_stage": "review_required",
-            "production_review_lead_time": "unknown",
-            "estimated_operating_days": (conservative + cap - 1) // cap,
+            "used_today_before_preflight": used,
+            "estimated_operating_days": max(1, math.ceil(conservative / cap)),
+            "approval_status": "probe_pending",
         }
-        if conservative > cap:
+        if used + conservative > cap:
             raise SystemExit(
                 f"preflight budget exceeds operating cap for {endpoint_id}: "
-                f"{conservative}>{cap}"
+                f"used={used}+planned={conservative}>{cap}"
             )
+
+    api5_cap = _operating_cap("api5")
+    api5_planned = 4
+    budgets["api5"] = {
+        "account_tier": os.environ.get("DATA_GO_KR_ACCOUNT_TIER", "development"),
+        "production_approval_status": os.environ.get(
+            "DATA_GO_KR_PRODUCTION_APPROVAL_STATUS", "unverified"
+        ),
+        "production_review_lead_time": os.environ.get(
+            "DATA_GO_KR_PRODUCTION_REVIEW_LEAD_TIME", "unverified"
+        ),
+        "official_daily_cap": int(
+            os.environ.get("DATA_GO_KR_DAILY_CAP_API5", OFFICIAL_DEVELOPMENT_DAILY_CAP)
+        ),
+        "logical_requests": 0,
+        "approval_probe_requests": api5_planned,
+        "conservative_requests": api5_planned,
+        "operating_cap": api5_cap,
+        "used_today_before_preflight": used_before["api5"],
+        "estimated_operating_days": 1,
+        "approval_status": "credential_probe_pending",
+    }
+    if used_before["api5"] + api5_planned > api5_cap:
+        raise SystemExit("preflight budget exceeds operating cap for api5")
 
     secret = os.environ.get("DATA_GO_KR_SERVICE_KEY")
     if not secret:
@@ -85,9 +155,18 @@ def main(argv: list[str] | None = None) -> int:
                         "raw_sha256": sha256_bytes(content),
                     }
                 )
+            budgets[endpoint_id]["approval_status"] = "probe_success"
     except KRAError as exc:
         print(f"preflight_failed={type(exc).__name__}: {exc}")
         return 2
+
+    used_after = _usage_today(ledger_path)
+    for endpoint_id, budget in budgets.items():
+        budget["used_today_after_preflight"] = used_after[endpoint_id]
+        budget["remaining_operating_calls"] = (
+            int(budget["operating_cap"]) - used_after[endpoint_id]
+        )
+    budgets["api5"]["approval_status"] = "credential_probe_success"
 
     report = {
         "status": "ready",
@@ -97,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
         "meets": meets,
         "endpoints": endpoint_ids,
         "page_size": args.page_size,
+        "quota_ledger": ledger_path.as_posix(),
+        "budget_policy": "development official cap 3000; operating cap defaults to 2500 (5/6)",
         "budgets": budgets,
         "approval_probes": probes,
     }

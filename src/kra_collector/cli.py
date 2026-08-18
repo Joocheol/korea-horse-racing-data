@@ -8,7 +8,13 @@ import sys
 from pathlib import Path
 
 from .client import KRAAuthenticationError, KRAClient, KRAError
-from .collect import UNRUN_PILOT_GATES, Collector, canonical_json, write_atomic
+from .collect import (
+    MAX_CALLS_PER_LOGICAL_REQUEST,
+    UNRUN_PILOT_GATES,
+    Collector,
+    canonical_json,
+    write_atomic,
+)
 from .registry import ENDPOINTS
 
 
@@ -72,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         "endpoints": endpoint_ids,
         "logical_requests_before_pagination": logical_requests,
         "minimum_requests_with_terminal_probe": logical_requests * 2,
-        "conservative_request_budget": logical_requests * 3,
+        "conservative_request_budget": logical_requests * MAX_CALLS_PER_LOGICAL_REQUEST,
         "page_size": args.page_size,
         "unrun_pilot_verification_gates": UNRUN_PILOT_GATES,
         "pilot_promotion_ready": False,

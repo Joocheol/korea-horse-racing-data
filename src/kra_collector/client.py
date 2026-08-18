@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -13,7 +16,9 @@ import requests
 BASE_URL = "https://apis.data.go.kr/B551015"
 SUCCESS_CODES = {"00", "0000", "NORMAL_CODE", "NORMAL SERVICE."}
 RETRYABLE_HTTP = {429, 500, 502, 503, 504}
-RETRYABLE_RESULT_CODES = {"22"}
+DAILY_QUOTA_RESULT_CODES = {"22"}
+RETRYABLE_RESULT_CODES = {"01", "05", "23"}
+DEFAULT_OPERATING_CAP = 2_500
 PROBE_PATH = "API5/quinellaOddsInfo"
 PROBE_PARAMS = {
     "meet": 1,
@@ -21,7 +26,7 @@ PROBE_PARAMS = {
     "rc_no": 1,
     "pageNo": 1,
     "numOfRows": 1,
-    "_type": "xml",
+    "_type": "json",
 }
 
 
@@ -94,7 +99,13 @@ def _raise_application_error(code: str, message: str) -> None:
         for token in ("SERVICE_KEY", "SERVICE KEY", "AUTH", "REGISTERED", "인증")
     ):
         raise KRAAuthenticationError(f"KRA application error: {code or 'unknown'}")
-    if code in RETRYABLE_RESULT_CODES or any(
+    if code in DAILY_QUOTA_RESULT_CODES:
+        raise KRAQuotaExceededError(f"KRA daily quota exhausted: {code or 'unknown'}")
+    if code in RETRYABLE_RESULT_CODES:
+        raise KRARetryableResponseError(
+            f"KRA temporary application error: {code or 'unknown'}"
+        )
+    if any(
         token in error_text for token in ("DAILY", "QUOTA", "LIMITED_NUMBER", "초과")
     ):
         raise KRAQuotaExceededError(f"KRA daily quota exhausted: {code or 'unknown'}")
@@ -221,12 +232,64 @@ class KRAClient:
         self.minimum_interval_seconds = minimum_interval_seconds
         self.session = session or requests.Session()
         self._last_request_at = 0.0
+        ledger = os.environ.get("KRA_QUOTA_LEDGER")
+        self._quota_ledger = Path(ledger) if ledger else None
         self.service_key, self.key_candidate = self._probe_service_key(service_key)
         self._secret_fingerprints = tuple(
             set(
                 secret_fingerprints(service_key) + secret_fingerprints(self.service_key)
             )
         )
+
+    @staticmethod
+    def _endpoint_id(path: str) -> str:
+        service = path.split("/", 1)[0].lower()
+        return service.removesuffix("_1")
+
+    def _calls_today(self, endpoint_id: str) -> int:
+        if self._quota_ledger is None or not self._quota_ledger.exists():
+            return 0
+        today = datetime.now(UTC).date().isoformat()
+        count = 0
+        for line in self._quota_ledger.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if (
+                record.get("utc_date") == today
+                and record.get("endpoint_id") == endpoint_id
+            ):
+                count += 1
+        return count
+
+    def _record_call(self, path: str, phase: str) -> None:
+        if self._quota_ledger is None:
+            return
+        endpoint_id = self._endpoint_id(path)
+        cap = int(
+            os.environ.get(
+                f"DATA_GO_KR_OPERATING_CAP_{endpoint_id.upper()}",
+                DEFAULT_OPERATING_CAP,
+            )
+        )
+        used = self._calls_today(endpoint_id)
+        if used >= cap:
+            raise KRAQuotaExceededError(
+                f"local operating cap reached for {endpoint_id}: {used}/{cap}"
+            )
+        now = datetime.now(UTC)
+        record = {
+            "schema_version": "1",
+            "occurred_at_utc": now.isoformat(),
+            "utc_date": now.date().isoformat(),
+            "endpoint_id": endpoint_id,
+            "phase": phase,
+        }
+        self._quota_ledger.parent.mkdir(parents=True, exist_ok=True)
+        with self._quota_ledger.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+            )
 
     def _probe_service_key(self, raw_service_key: str) -> tuple[str, str]:
         """Select the working key candidate by calling an approved API.
@@ -238,65 +301,42 @@ class KRAClient:
 
         failures: list[str] = []
         for label, candidate in service_key_candidates(raw_service_key):
-            for attempt in range(1, self.max_attempts + 1):
-                try:
-                    response = self.session.get(
-                        f"{BASE_URL}/{PROBE_PATH}",
-                        params={"serviceKey": candidate, **PROBE_PARAMS},
-                        timeout=self.timeout_seconds,
-                        headers={
-                            "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
-                        },
-                    )
-                except (requests.Timeout, requests.ConnectionError):
-                    if attempt < self.max_attempts:
-                        time.sleep(min(2 ** (attempt - 1), 30.0))
-                        continue
-                    failures.append(f"{label}:transport_exhausted")
-                    break
-                except requests.RequestException:
-                    failures.append(f"{label}:transport_fatal")
-                    break
+            try:
+                self._record_call(PROBE_PATH, "credential_probe")
+                response = self.session.get(
+                    f"{BASE_URL}/{PROBE_PATH}",
+                    params={"serviceKey": candidate, **PROBE_PARAMS},
+                    timeout=self.timeout_seconds,
+                    headers={
+                        "User-Agent": "korea-horse-racing-data/0.1 (+public research)"
+                    },
+                )
+            except requests.RequestException as exc:
+                raise KRAResponseError(
+                    "API5 credential probe could not complete because of a transport error"
+                ) from exc
 
-                # An already encoded key passed through requests(params=...) is
-                # double-encoded and data.go.kr commonly answers HTTP 400. That
-                # rejects this candidate but must not suppress the decoded one.
-                if response.status_code in RETRYABLE_HTTP or response.status_code >= 500:
-                    if attempt < self.max_attempts:
-                        retry_after = response.headers.get("Retry-After")
-                        delay = (
-                            float(retry_after)
-                            if retry_after and retry_after.isdigit()
-                            else 2 ** (attempt - 1)
-                        )
-                        time.sleep(min(delay, 30.0))
-                        continue
-                    failures.append(f"{label}:http_{response.status_code}_exhausted")
-                    break
-                if response.status_code >= 400:
-                    failures.append(f"{label}:http_{response.status_code}")
-                    break
+            # An already encoded key passed through requests(params=...) is
+            # double-encoded and data.go.kr commonly answers HTTP 400. That is
+            # a candidate rejection, not a reason to skip the decoded candidate.
+            if response.status_code in RETRYABLE_HTTP or response.status_code >= 500:
+                raise KRAResponseError(
+                    f"API5 credential probe received retryable HTTP {response.status_code}"
+                )
+            if response.status_code >= 400:
+                failures.append(f"{label}:http_{response.status_code}")
+                continue
 
-                try:
-                    parse_envelope(
-                        response.content,
-                        response.headers.get("Content-Type", ""),
-                        "xml",
-                    )
-                except KRAAuthenticationError:
-                    failures.append(f"{label}:authentication_rejected")
-                    break
-                except KRARetryableResponseError:
-                    if attempt < self.max_attempts:
-                        time.sleep(min(2 ** (attempt - 1), 30.0))
-                        continue
-                    failures.append(f"{label}:application_retry_exhausted")
-                    break
-                except KRAResponseError:
-                    failures.append(f"{label}:invalid_response")
-                    break
-                else:
-                    return candidate, label
+            try:
+                parse_envelope(
+                    response.content, response.headers.get("Content-Type", "")
+                )
+            except KRAAuthenticationError:
+                failures.append(f"{label}:authentication_rejected")
+            except KRAResponseError:
+                failures.append(f"{label}:invalid_response")
+            else:
+                return candidate, label
         tried = ", ".join(failures) or "no valid candidate"
         raise KRAAuthenticationError(
             "API5 rejected every service-key candidate "
@@ -320,6 +360,7 @@ class KRAClient:
             if elapsed < self.minimum_interval_seconds:
                 time.sleep(self.minimum_interval_seconds - elapsed)
             try:
+                self._record_call(path, "data_request")
                 response = self.session.get(
                     url,
                     params=params,

@@ -10,9 +10,12 @@ from typing import Any
 from .cli import month_range
 from .client import KRAResponseError, parse_envelope, sha256_bytes
 from .collect import (
+    COLLECTOR_SCHEMA_VERSION,
     ENFORCED_GATES,
     UNRUN_PILOT_GATES,
+    business_key_hash,
     canonical_json,
+    collector_contract_hash,
     request_id,
     write_atomic,
 )
@@ -79,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         if key not in expected:
             continue
         total_count = int(record["total_count"])
+        if record.get("schema_version") != COLLECTOR_SCHEMA_VERSION:
+            errors.append(f"schema_version_mismatch:{key}")
+        if record.get("collector_contract_sha256") != collector_contract_hash(
+            ENDPOINTS[key[0]]
+        ):
+            errors.append(f"collector_contract_mismatch:{key}")
         params = record.get("canonical_params_without_service_key", {})
         if request_id(str(record["endpoint_id"]), params) != record.get("request_id"):
             errors.append(f"request_id_mismatch:{key}")
@@ -97,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         raw_row_hashes: set[str] = set()
+        business_keys: set[str] = set()
         pages = record.get("pages", [])
         page_size = int(params.get("numOfRows", 0))
         expected_page_count = (
@@ -138,12 +148,18 @@ def main(argv: list[str] | None = None) -> int:
                 errors.append(f"page_row_count_mismatch:{key}:{page_no}")
             for row in envelope.rows:
                 row_hash = sha256_bytes(canonical_json(row))
-                if row_hash in raw_row_hashes:
-                    errors.append(f"duplicate_row:{key}:{page['page_no']}")
+                try:
+                    row_key = business_key_hash(ENDPOINTS[key[0]], row)
+                except KRAResponseError:
+                    errors.append(f"business_key_invalid:{key}:{page['page_no']}")
+                    continue
+                if row_key in business_keys:
+                    errors.append(f"duplicate_business_key:{key}:{page['page_no']}")
+                business_keys.add(row_key)
                 raw_row_hashes.add(row_hash)
 
-        if len(raw_row_hashes) != total_count:
-            errors.append(f"deduplicated_count_mismatch:{key}")
+        if len(business_keys) != total_count:
+            errors.append(f"business_key_count_mismatch:{key}")
 
         probe = record.get("terminal_probe")
         if not probe:
@@ -193,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         errors.append("all_zero_snapshot_has_no_positive_row_evidence")
 
     report = {
-        "schema_version": "1",
+        "schema_version": COLLECTOR_SCHEMA_VERSION,
         "snapshot_id": args.snapshot_id,
         "status": "failed" if errors else "core_transport_verified",
         "expected_logical_requests": len(expected),

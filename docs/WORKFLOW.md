@@ -12,14 +12,35 @@
 6. 모든 PR에서 pytest, compile, dry-run 예산 계산을 실행한다.
 7. `ai-review` 라벨이 있는 PR의 구현을 Claude가 1회 검토한다.
 8. 교수의 `kra-collection` environment 승인 뒤에만 수집한다.
-9. 같은 `snapshot_id`의 기존 매니페스트와 파일 해시가 맞으면 완료 요청을 건너뛴다.
-10. 수집 뒤 페이지 교집합 0, 중복제거 행 수=`totalCount`, 다음 페이지 0행,
+9. 같은 `snapshot_id`의 페이지 ledger와 파일 해시가 맞으면 마지막 완료 `pageNo` 다음부터
+   재개하며, 완료된 논리 요청은 매니페스트로 건너뛴다.
+10. 수집 뒤 경주＋승식＋조합 business key 중복 0, key 합집합=`totalCount`, 다음 페이지 0행,
     원응답·정규화 해시를 재검사한다.
-11. 매니페스트와 품질보고서는 별도 PR로 영구 보존한다. 공개 API 원응답은
-    `이용허락범위 제한 없음` 조건으로 공개 가능하지만, 대용량 원문은 Release
-    자산으로 분리하고 KRA 웹 스크래핑 원문은 별도 격리한다.
+11. 매니페스트와 품질보고서는 별도 PR로 영구 보존하고 원응답은 라이선스 게이트
+    전에는 Git에 넣지 않는다.
 12. Claude가 매니페스트와 품질보고서만 읽어 산출물 검토를 1회 수행한다.
-13. 공개등급·main 병합·전 역사 확장은 교수가 승인한다.
+13. 라이선스·공개등급·main 병합·전 역사 확장은 교수가 승인한다.
+
+모든 실제 호출은 UTC 일자별 quota ledger에 먼저 기록한다. 개발계정 공식 한도
+3,000회의 5/6인 2,500회를 기본 운영상한으로 사용하며, preflight는 이미 쓴 호출,
+자격·승인 probe, 예상 수집 호출과 운영일수를 함께 보고한다.
+
+원응답은 공개 Actions artifact에 올리지 않고 AES-256 대칭암호화해
+`kra-private-archive` draft release에만 보존한다. secret scan이 실패한 실행도 같은
+비공개 암호화 경로에 quarantine하며 공개 산출물은 만들지 않는다. 이 draft release는
+공개해서는 안 된다. 자동 재개는 secret scan을 통과한 `*-success.tar.gz.gpg`만
+복호화하며 `*-failure.tar.gz.gpg` quarantine은 수동 조사 전 재사용하지 않는다.
+
+최초 실행 전 저장소에 두 Actions secret이 필요하다. `kra-collection` environment는
+별도로 교수 승인 게이트를 제공한다.
+
+```bash
+gh secret set DATA_GO_KR_SERVICE_KEY --repo Joocheol/korea-horse-racing-data
+openssl rand -base64 48 | gh secret set KRA_ARCHIVE_PASSPHRASE --repo Joocheol/korea-horse-racing-data
+```
+
+두 번째 명령은 새 암호를 생성해 GitHub로 바로 전달하므로 터미널 화면이나 셸 변수에
+암호 원문을 남기지 않는다. 해당 암호를 잃으면 암호화 archive는 복원할 수 없다.
 
 `core_transport_verified`는 10번의 전송·무결성 검사만 통과했다는 뜻이다.
 API26 출주두수, API5×API29 복승, API214 착순, 환급률·오버라운드, 시행/시험 기록

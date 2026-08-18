@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import json
 import os
 from pathlib import Path
 
@@ -30,11 +31,24 @@ def main(argv: list[str] | None = None) -> int:
         description="Scan KRA artifacts for service-key variants"
     )
     parser.add_argument("--root", required=True)
+    parser.add_argument("--report")
     args = parser.parse_args(argv)
     secret = os.environ.get("DATA_GO_KR_SERVICE_KEY")
     if not secret:
         raise SystemExit("DATA_GO_KR_SERVICE_KEY is required")
     findings = scan_tree(Path(args.root), secret)
+    if args.report:
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {"status": "failed" if findings else "passed", "findings": findings},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     for finding in findings:
         print(finding)
     return 2 if findings else 0
