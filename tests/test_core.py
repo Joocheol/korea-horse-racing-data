@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 from kra_data.audit import audit_output
@@ -15,7 +15,7 @@ from kra_data.cli import main as collect_main
 from kra_data.client import KRAClient, Page, parse_page, parse_response
 from kra_data.collector import collect_units
 from kra_data.config import ENDPOINTS
-from kra_data.errors import SchemaError, TransientAPIError, ValidationError
+from kra_data.errors import PermanentAPIError, SchemaError, TransientAPIError, ValidationError
 from kra_data.ledger import Ledger
 from kra_data.models import RequestUnit
 from kra_data.planning import build_units
@@ -73,6 +73,32 @@ class ParseTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn("TimeoutError: timed out", message)
         self.assertNotIn("secret-value", message)
+
+    def test_http_error_reports_body_without_service_key(self) -> None:
+        service_key = "decoded+secret/key=="
+        encoded_key = "decoded%2Bsecret%2Fkey%3D%3D"
+
+        def forbidden(*args, **kwargs):
+            body = (
+                "<error><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR"
+                f"</returnAuthMsg><request>serviceKey={encoded_key}&amp;pageNo=1</request></error>"
+            ).encode()
+            raise HTTPError(
+                "https://example.invalid",
+                403,
+                "Forbidden",
+                {},
+                io.BytesIO(body),
+            )
+
+        client = KRAClient(service_key, max_attempts=1, opener=forbidden)
+        with self.assertRaises(PermanentAPIError) as raised:
+            client.fetch_page(RequestUnit("results", 1, "202512"), 1, 10)
+        message = str(raised.exception)
+        self.assertIn("permanent HTTP 403", message)
+        self.assertIn("SERVICE_KEY_IS_NOT_REGISTERED_ERROR", message)
+        self.assertNotIn(service_key, message)
+        self.assertNotIn(encoded_key, message)
 
 
 class FormatAndPlanningTests(unittest.TestCase):
