@@ -1,0 +1,6 @@
+{
+  "response": {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {"items": "", "pageNo": 1, "numOfRows": 100000, "totalCount": 0}
+  }
+}

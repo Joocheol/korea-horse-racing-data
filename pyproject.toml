@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "korea-horse-racing-data"
+version = "0.1.0"
+description = "Reproducible KRA OpenAPI collection and validation"
+requires-python = ">=3.11"
+
+[project.scripts]
+kra-collect = "kra_data.cli:main"
+kra-preflight = "kra_data.preflight:main"
+kra-audit = "kra_data.audit:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

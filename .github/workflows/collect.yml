@@ -1,0 +1,123 @@
+name: Collect KRA pilot batch
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: First year
+        required: true
+        default: "2020"
+      end_year:
+        description: Last year
+        required: true
+        default: "2021"
+      meets:
+        description: Comma-separated meet codes
+        required: true
+        default: "1,2,3"
+      endpoints:
+        description: Comma-separated endpoint names
+        required: true
+        default: "single,double,triple,sales,entries,results,race_record,quinella_crosscheck"
+      max_units:
+        description: Maximum pending ledger units in this approved batch
+        required: true
+        default: "20"
+      used_json:
+        description: Calls already used today keyed by API service, as JSON
+        required: true
+        default: "{}"
+      resume_run_id:
+        description: Optional prior Actions run ID whose state artifact should be restored
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: kra-pilot-collection
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Enforce request budget
+        env:
+          START_YEAR: ${{ inputs.start_year }}
+          END_YEAR: ${{ inputs.end_year }}
+          MEETS: ${{ inputs.meets }}
+          ENDPOINTS: ${{ inputs.endpoints }}
+          MAX_UNITS: ${{ inputs.max_units }}
+          USED_JSON: ${{ inputs.used_json }}
+        run: >-
+          python -m kra_data.preflight
+          --start-year "$START_YEAR"
+          --end-year "$END_YEAR"
+          --meets "$MEETS"
+          --endpoints "$ENDPOINTS"
+          --max-units "$MAX_UNITS"
+          --used-json "$USED_JSON"
+
+  collect:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: kra-collection
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Restore explicitly selected prior state
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kra-collection-state
+          path: output
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+      - name: Collect approved batch
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+          START_YEAR: ${{ inputs.start_year }}
+          END_YEAR: ${{ inputs.end_year }}
+          MEETS: ${{ inputs.meets }}
+          ENDPOINTS: ${{ inputs.endpoints }}
+          MAX_UNITS: ${{ inputs.max_units }}
+          USED_JSON: ${{ inputs.used_json }}
+        run: >-
+          python -m kra_data.cli
+          --start-year "$START_YEAR"
+          --end-year "$END_YEAR"
+          --meets "$MEETS"
+          --endpoints "$ENDPOINTS"
+          --max-units "$MAX_UNITS"
+          --used-json "$USED_JSON"
+          --output output
+      - name: Recompute checksums and technical completeness
+        run: python -m kra_data.audit --output output
+      - name: Preserve raw data, ledger, and failure evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-collection-state
+          path: output
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
