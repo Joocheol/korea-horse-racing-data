@@ -16,6 +16,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--endpoint", choices=tuple(ENDPOINTS), required=True)
     result.add_argument("--meet", type=int, required=True)
     result.add_argument("--month", required=True)
+    result.add_argument("--race-date")
+    result.add_argument("--race-no", type=int)
     result.add_argument("--pool")
     result.add_argument("--page-no", type=int, default=1)
     result.add_argument("--num-rows", type=int, default=10)
@@ -33,6 +35,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("num_rows must be positive")
     if args.timeout <= 0:
         raise SystemExit("timeout must be positive")
+    if args.race_date is not None:
+        if len(args.race_date) != 8 or not args.race_date.isdigit():
+            raise SystemExit("race_date must be YYYYMMDD")
+        if not args.race_date.startswith(args.month):
+            raise SystemExit("race_date must belong to month")
+    if args.race_no is not None and args.race_no < 1:
+        raise SystemExit("race_no must be positive")
+    if args.race_no is not None and args.race_date is None:
+        raise SystemExit("race_no requires race_date")
 
     endpoint = ENDPOINTS[args.endpoint]
     pool = args.pool
@@ -49,18 +60,32 @@ def main(argv: list[str] | None = None) -> int:
         "service": endpoint.service,
         "meet": unit.meet,
         "month": unit.month,
+        "race_date": args.race_date,
+        "race_no": args.race_no,
         "pool": unit.pool,
         "page_no": args.page_no,
         "num_rows": args.num_rows,
         "timeout": args.timeout,
         "max_attempts": args.max_attempts,
     }
+    query_overrides: dict[str, str | int | None] | None = None
+    if args.race_date is not None:
+        query_overrides = {
+            "rc_month": None,
+            "rc_date": args.race_date,
+            "rc_no": args.race_no,
+        }
     try:
         page = KRAClient(
             service_key,
             timeout=args.timeout,
             max_attempts=args.max_attempts,
-        ).fetch_page(unit, args.page_no, args.num_rows)
+        ).fetch_page(
+            unit,
+            args.page_no,
+            args.num_rows,
+            query_overrides=query_overrides,
+        )
     except Exception as exc:
         print(
             json.dumps(

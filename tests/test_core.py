@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from kra_data.audit import audit_output
@@ -156,6 +157,73 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["response"]["total_count"], 123)
         self.assertEqual(report["response"]["row_count"], 1)
         self.assertNotIn("secret-value", output.getvalue())
+
+    def test_client_can_replace_month_with_race_date_and_number(self) -> None:
+        captured_url = ""
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def read(self):
+                return (FIXTURES / "page_one.xml").read_bytes()
+
+        def opener(request, **kwargs):
+            nonlocal captured_url
+            captured_url = request.full_url
+            return Response()
+
+        client = KRAClient("decoded+secret/key==", max_attempts=1, opener=opener)
+        page = client.fetch_page(
+            RequestUnit("results", 1, "202512"),
+            1,
+            10,
+            query_overrides={
+                "rc_month": None,
+                "rc_date": "20251207",
+                "rc_no": 1,
+            },
+        )
+
+        query = parse_qs(urlparse(captured_url).query)
+        self.assertNotIn("rc_month", query)
+        self.assertEqual(query["rc_date"], ["20251207"])
+        self.assertEqual(query["rc_no"], ["1"])
+        self.assertEqual(page.total_count, 1)
+
+    def test_probe_passes_race_filter_to_client(self) -> None:
+        page = Page(1, 1, [{"rcNo": "1"}], b"<response />", "xml")
+        output = io.StringIO()
+        with (
+            patch.dict(os.environ, {"PROBE_TEST_KEY": "secret-value"}),
+            patch("kra_data.probe.KRAClient.fetch_page", return_value=page) as fetch,
+            redirect_stdout(output),
+        ):
+            result = probe_main([
+                "--endpoint", "results", "--meet", "1", "--month", "202512",
+                "--race-date", "20251207", "--race-no", "1",
+                "--num-rows", "10", "--service-key-env", "PROBE_TEST_KEY",
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(fetch.call_args.kwargs["query_overrides"], {
+            "rc_month": None,
+            "rc_date": "20251207",
+            "rc_no": 1,
+        })
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["request"]["race_date"], "20251207")
+        self.assertEqual(report["request"]["race_no"], 1)
+
+    def test_probe_rejects_race_number_without_date(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "race_no requires race_date"):
+            probe_main([
+                "--endpoint", "results", "--meet", "1", "--month", "202512",
+                "--race-no", "1", "--service-key-env", "PROBE_TEST_KEY",
+            ])
 
 
 class ValidationTests(unittest.TestCase):

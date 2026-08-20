@@ -15,6 +15,14 @@ on:
         description: Month in YYYYMM format
         required: true
         default: "202001"
+      race_date:
+        description: Optional race date in YYYYMMDD (replaces rc_month)
+        required: false
+        default: ""
+      race_no:
+        description: Optional race number (requires race_date)
+        required: false
+        default: ""
       pool:
         description: Optional pool code
         required: false
@@ -63,6 +71,8 @@ jobs:
           ENDPOINT: ${{ inputs.endpoint }}
           MEET: ${{ inputs.meet }}
           MONTH: ${{ inputs.month }}
+          RACE_DATE: ${{ inputs.race_date }}
+          RACE_NO: ${{ inputs.race_no }}
           POOL: ${{ inputs.pool }}
           PAGE_NO: ${{ inputs.page_no }}
           NUM_ROWS: ${{ inputs.num_rows }}
@@ -80,5 +90,11 @@ jobs:
           )
           if [[ -n "$POOL" ]]; then
             args+=(--pool "$POOL")
+          fi
+          if [[ -n "$RACE_DATE" ]]; then
+            args+=(--race-date "$RACE_DATE")
+          fi
+          if [[ -n "$RACE_NO" ]]; then
+            args+=(--race-no "$RACE_NO")
           fi
           python -m kra_data.probe "${args[@]}"
