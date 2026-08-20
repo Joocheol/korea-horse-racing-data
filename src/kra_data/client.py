@@ -29,7 +29,10 @@ class Page:
 def _check_result_code(code: object, message: object) -> None:
     result_code = str(code or "")
     if result_code not in {"00", "0", "0000"}:
-        raise PermanentAPIError(f"API result {result_code}: {message or 'API error'}")
+        detail = str(message or "API error")
+        if result_code == "99" and ("세션" in detail or "session" in detail.lower()):
+            raise TransientAPIError(f"API result {result_code}: {detail}")
+        raise PermanentAPIError(f"API result {result_code}: {detail}")
 
 
 def parse_page(
@@ -211,6 +214,8 @@ class KRAClient:
                 error = TransientAPIError(
                     f"temporary transport failure: {type(exc).__name__} ({exc})"
                 )
+            except TransientAPIError as exc:
+                error = exc
 
             if attempt == self.max_attempts:
                 raise error
