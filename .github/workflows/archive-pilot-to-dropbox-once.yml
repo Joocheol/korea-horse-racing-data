@@ -145,6 +145,15 @@ jobs:
           cp work/selection.json packages/source-artifact-2020-2021.json
           (cd packages && sha256sum * > SHA256SUMS)
 
+      - name: Preserve Dropbox-ready packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-dropbox-packages-2020-2021
+          path: packages
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
       - name: Upload audited packages to exact Dropbox path
         id: dropbox
         continue-on-error: true
