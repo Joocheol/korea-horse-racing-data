@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote_plus, unquote_plus, urlencode
 from urllib.request import Request, urlopen
 
 from .config import BASE_URL, ENDPOINTS
@@ -120,6 +121,33 @@ def parse_response(raw_body: bytes, response_format: str, page_no: int) -> Page:
     return parse_page(payload, page_no, raw_body=raw_body)
 
 
+def _safe_http_error_body(exc: HTTPError, service_key: str) -> str:
+    """Return a bounded HTTP error body without exposing the service key."""
+    try:
+        raw_body = exc.read(8_192)
+    except Exception:
+        return ""
+    if not raw_body:
+        return ""
+
+    detail = " ".join(raw_body.decode("utf-8-sig", errors="replace").split())
+    decoded_key = unquote_plus(service_key)
+    candidates = {
+        service_key,
+        decoded_key,
+        quote_plus(service_key),
+        quote_plus(decoded_key),
+    }
+    for candidate in sorted((value for value in candidates if value), key=len, reverse=True):
+        detail = detail.replace(candidate, "[REDACTED]")
+    detail = re.sub(
+        r"(?i)(serviceKey(?:=|%3D))[^&\s<\"']+",
+        r"\1[REDACTED]",
+        detail,
+    )
+    return detail[:2_000]
+
+
 class KRAClient:
     def __init__(
         self,
@@ -157,7 +185,9 @@ class KRAClient:
                 if exc.code == 429 or 500 <= exc.code < 600:
                     error: Exception = TransientAPIError(f"transient HTTP {exc.code}")
                 else:
-                    raise PermanentAPIError(f"permanent HTTP {exc.code}") from exc
+                    detail = _safe_http_error_body(exc, self._service_key)
+                    suffix = f"; response body: {detail}" if detail else "; empty response body"
+                    raise PermanentAPIError(f"permanent HTTP {exc.code}{suffix}") from exc
             except URLError as exc:
                 reason = exc.reason
                 detail = f"{type(reason).__name__}: {reason}" if reason is not None else "unknown reason"
