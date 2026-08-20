@@ -15,7 +15,7 @@ from .planning import (
     discover_result_dates,
     race_record_coverage_complete,
 )
-from .preflight import _csv_ints, _csv_strings, check_budget
+from .preflight import BudgetResult, _csv_ints, _csv_strings, check_budget
 
 
 def parser() -> argparse.ArgumentParser:
@@ -40,11 +40,26 @@ def _selected_pending(
     return pending if remaining is None else pending[:remaining]
 
 
-def _enforce_budget(selected, used: dict[str, int]) -> None:
+def _enforce_budget(selected, used: dict[str, int]) -> list[BudgetResult]:
     budgets = check_budget(selected, used)
     if not all(item.allowed for item in budgets):
         blocked = ", ".join(item.service for item in budgets if not item.allowed)
         raise SystemExit(f"preflight blocked collection: API budget exceeded ({blocked})")
+    return budgets
+
+
+def _budget_report(budgets: list[BudgetResult]) -> list[dict[str, int | bool | str]]:
+    return [
+        {
+            "service": item.service,
+            "estimated_calls": item.estimated_calls,
+            "used_calls": item.used_calls,
+            "safety_margin": item.safety_margin,
+            "daily_limit": item.daily_limit,
+            "allowed": item.allowed,
+        }
+        for item in budgets
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     completed = ledger.completed()
     remaining = args.max_units
     phase1_selected = _selected_pending(phase1_units, completed, remaining)
-    _enforce_budget(phase1_selected, used)
+    phase1_budgets = _enforce_budget(phase1_selected, used)
 
     client: KRAClient | None = None
 
@@ -88,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     phase2_processed = phase2_skipped = 0
     result_dates: tuple[tuple[int, str], ...] = ()
     results_deferred = False
+    phase2_budgets: list[BudgetResult] = []
+    phase2_selected_count = 0
 
     if "results" in endpoints and (remaining is None or remaining > 0):
         if not race_record_coverage_complete(
@@ -103,7 +120,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             completed = Ledger(args.output / "ledger.json").completed()
             phase2_selected = _selected_pending(result_units, completed, remaining)
-            _enforce_budget(phase2_selected, used)
+            phase2_selected_count = len(phase2_selected)
+            phase2_budgets = _enforce_budget(phase2_selected, used)
             if phase2_selected:
                 phase2_processed, phase2_skipped = collect_units(
                     get_client(), phase2_selected, args.output
@@ -114,6 +132,9 @@ def main(argv: list[str] | None = None) -> int:
         "skipped": phase1_skipped + phase2_skipped,
         "phase1_processed": phase1_processed,
         "phase2_processed": phase2_processed,
+        "phase1_budget": _budget_report(phase1_budgets),
+        "phase2_budget": _budget_report(phase2_budgets),
+        "phase2_selected_units": phase2_selected_count,
         "result_dates_discovered": len(result_dates),
         "results_deferred": results_deferred,
     }
