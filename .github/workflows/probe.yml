@@ -1,0 +1,84 @@
+name: Probe one KRA API page
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: Collector endpoint name
+        required: true
+        default: "single"
+      meet:
+        description: Meet code
+        required: true
+        default: "1"
+      month:
+        description: Month in YYYYMM format
+        required: true
+        default: "202001"
+      pool:
+        description: Optional pool code
+        required: false
+        default: ""
+      page_no:
+        description: Page number
+        required: true
+        default: "1"
+      num_rows:
+        description: Requested rows on this page only
+        required: true
+        default: "10"
+      timeout:
+        description: Per-attempt timeout in seconds
+        required: true
+        default: "20"
+      max_attempts:
+        description: Number of attempts
+        required: true
+        default: "2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kra-api-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: kra-collection
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Probe exactly one page
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+          ENDPOINT: ${{ inputs.endpoint }}
+          MEET: ${{ inputs.meet }}
+          MONTH: ${{ inputs.month }}
+          POOL: ${{ inputs.pool }}
+          PAGE_NO: ${{ inputs.page_no }}
+          NUM_ROWS: ${{ inputs.num_rows }}
+          TIMEOUT: ${{ inputs.timeout }}
+          MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        run: |
+          args=(
+            --endpoint "$ENDPOINT"
+            --meet "$MEET"
+            --month "$MONTH"
+            --page-no "$PAGE_NO"
+            --num-rows "$NUM_ROWS"
+            --timeout "$TIMEOUT"
+            --max-attempts "$MAX_ATTEMPTS"
+          )
+          if [[ -n "$POOL" ]]; then
+            args+=(--pool "$POOL")
+          fi
+          python -m kra_data.probe "${args[@]}"
