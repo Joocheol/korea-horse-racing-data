@@ -1,0 +1,76 @@
+name: Run full KRA 2020-2021 pilot once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/full-pilot-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kra-pilot-collection
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Enforce full-pilot request budget
+        run: >-
+          python -m kra_data.preflight
+          --start-year 2020
+          --end-year 2021
+          --meets "1,2,3"
+          --endpoints "single,double,triple,sales,entries,results,race_record,quinella_crosscheck"
+          --max-units 2913
+          --used-json '{}'
+
+  collect:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: kra-collection
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Collect full approved pilot
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+        run: >-
+          python -m kra_data.cli
+          --start-year 2020
+          --end-year 2021
+          --meets "1,2,3"
+          --endpoints "single,double,triple,sales,entries,results,race_record,quinella_crosscheck"
+          --max-units 2913
+          --used-json '{}'
+          --output output
+      - name: Recompute checksums and technical completeness
+        run: python -m kra_data.audit --output output
+      - name: Preserve raw data, ledger, and failure evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-collection-state
+          path: output
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
