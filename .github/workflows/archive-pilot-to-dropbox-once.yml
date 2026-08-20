@@ -293,6 +293,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
+          CURRENT_ARCHIVE_RUN_ID: ${{ github.run_id }}
+          CURRENT_ARCHIVE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DROPBOX_OUTCOME: ${{ steps.dropbox.outcome }}
         run: |
           python <<'PY'
@@ -311,6 +313,10 @@ jobs:
           for path in sorted(pathlib.Path("packages").glob("*")) if pathlib.Path("packages").exists() else []:
               packages.append({"name": path.name, "size": path.stat().st_size})
           evidence = {
+              "archive_workflow": {
+                  "run_id": int(os.environ["CURRENT_ARCHIVE_RUN_ID"]),
+                  "run_url": os.environ["CURRENT_ARCHIVE_RUN_URL"],
+              },
               "scope": {"years": [2020, 2021], "meets": [1, 2, 3], "planned_units": 2913},
               "source": read_json("work/selection.json", {"status": "selection_unavailable"}),
               "technical_audit": read_json(
