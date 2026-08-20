@@ -1,0 +1,366 @@
+name: Archive audited KRA pilot to Dropbox once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/archive-pilot-to-dropbox-once.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: kra-pilot-dropbox-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONPATH: src
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Download latest successful collection state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          python <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import urllib.request
+
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "kra-pilot-archiver",
+          }
+
+          def get_json(url):
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
+                  return json.load(response)
+
+          listing = get_json(
+              f"https://api.github.com/repos/{repository}/actions/artifacts"
+              "?name=kra-collection-state&per_page=100"
+          )
+          candidates = sorted(
+              (item for item in listing.get("artifacts", []) if not item.get("expired")),
+              key=lambda item: item.get("created_at", ""),
+              reverse=True,
+          )
+          selected = None
+          selected_run = None
+          for artifact in candidates:
+              run_id = int(artifact["workflow_run"]["id"])
+              run = get_json(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}")
+              if run.get("status") == "completed" and run.get("conclusion") == "success":
+                  selected = artifact
+                  selected_run = run
+                  break
+          if selected is None:
+              raise SystemExit("no unexpired kra-collection-state artifact from a successful run")
+
+          request = urllib.request.Request(selected["archive_download_url"], headers=headers)
+          with urllib.request.urlopen(request) as response:
+              payload = response.read()
+          pathlib.Path("work").mkdir()
+          pathlib.Path("work/kra-collection-state.zip").write_bytes(payload)
+          selection = {
+              "artifact_id": selected["id"],
+              "artifact_name": selected["name"],
+              "artifact_created_at": selected["created_at"],
+              "artifact_size_in_bytes": selected["size_in_bytes"],
+              "archive_sha256": hashlib.sha256(payload).hexdigest(),
+              "workflow_run_id": selected_run["id"],
+              "workflow_run_url": selected_run["html_url"],
+              "workflow_run_conclusion": selected_run["conclusion"],
+              "workflow_head_sha": selected_run["head_sha"],
+          }
+          pathlib.Path("work/selection.json").write_text(
+              json.dumps(selection, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(selection, ensure_ascii=False, indent=2))
+          PY
+
+          mkdir -p output
+          unzip -q work/kra-collection-state.zip -d output
+
+      - name: Recompute technical audit
+        run: |
+          python -m kra_data.audit --output output | tee work/audit-stdout.json
+          python <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("output/quality/technical-audit.json").read_text(encoding="utf-8"))
+          assert report["passed"] is True, report
+          assert report["ledger_units"] == 2913, report
+          assert report["audited_complete_units"] == 2913, report
+          assert report["state_counts"] == {"complete": 2913}, report
+          assert report["errors"] == [], report
+          print("Technical gate passed: 2,913 / 2,913 complete units")
+          PY
+
+      - name: Package immutable Dropbox layers
+        run: |
+          mkdir -p packages
+          tar -C output -czf packages/kra-raw-2020-2021.tar.gz raw
+          tar -C output -czf packages/kra-normalized-2020-2021.tar.gz staged
+          tar -C output -czf packages/kra-manifests-2020-2021.tar.gz ledger.json quality
+
+          if [ -d output/failures ]; then
+            tar -C output -czf packages/kra-quarantine-2020-2021.tar.gz failures
+          else
+            mkdir -p work/quarantine
+            printf '%s\n' 'No failure directory was present after the successful audit.' > work/quarantine/README.txt
+            tar -C work -czf packages/kra-quarantine-2020-2021.tar.gz quarantine
+          fi
+
+          tar -czf packages/kra-docs-2020-2021.tar.gz README.md docs
+          cp output/quality/technical-audit.json packages/technical-audit-2020-2021.json
+          cp work/selection.json packages/source-artifact-2020-2021.json
+          (cd packages && sha256sum * > SHA256SUMS)
+
+      - name: Upload audited packages to exact Dropbox path
+        id: dropbox
+        continue-on-error: true
+        run: |
+          python <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          required = ["DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "DROPBOX_REFRESH_TOKEN"]
+          missing = [name for name in required if not os.environ.get(name)]
+          status_path = pathlib.Path("work/dropbox-status.json")
+          if missing:
+              status_path.write_text(
+                  json.dumps({"status": "missing_secrets", "missing": missing}, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+              raise SystemExit("Dropbox repository secrets are missing: " + ", ".join(missing))
+
+          credentials = base64.b64encode(
+              f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()
+          ).decode()
+          token_request = urllib.request.Request(
+              "https://api.dropboxapi.com/oauth2/token",
+              data=urllib.parse.urlencode({
+                  "grant_type": "refresh_token",
+                  "refresh_token": os.environ["DROPBOX_REFRESH_TOKEN"],
+              }).encode(),
+              headers={"Authorization": f"Basic {credentials}"},
+          )
+          with urllib.request.urlopen(token_request) as response:
+              access_token = json.load(response)["access_token"]
+
+          auth = {"Authorization": f"Bearer {access_token}"}
+          base_path = "/앱/kra-data"
+          metadata_request = urllib.request.Request(
+              "https://api.dropboxapi.com/2/files/get_metadata",
+              data=json.dumps({"path": base_path}).encode(),
+              headers={**auth, "Content-Type": "application/json"},
+          )
+          try:
+              with urllib.request.urlopen(metadata_request) as response:
+                  json.load(response)
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", "replace")[:2000]
+              status_path.write_text(
+                  json.dumps({
+                      "status": "target_path_unavailable",
+                      "target": base_path,
+                      "http_status": exc.code,
+                      "detail": detail,
+                  }, ensure_ascii=False, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+              raise SystemExit(
+                  "The Dropbox token cannot access /앱/kra-data; use a Full Dropbox app token."
+              )
+
+          destinations = {
+              "kra-raw-2020-2021.tar.gz": f"{base_path}/raw/kra-raw-2020-2021.tar.gz",
+              "kra-normalized-2020-2021.tar.gz": f"{base_path}/normalized/kra-normalized-2020-2021.tar.gz",
+              "kra-manifests-2020-2021.tar.gz": f"{base_path}/manifests/kra-manifests-2020-2021.tar.gz",
+              "kra-quarantine-2020-2021.tar.gz": f"{base_path}/quarantine/kra-quarantine-2020-2021.tar.gz",
+              "kra-docs-2020-2021.tar.gz": f"{base_path}/docs/kra-docs-2020-2021.tar.gz",
+              "technical-audit-2020-2021.json": f"{base_path}/manifests/technical-audit-2020-2021.json",
+              "source-artifact-2020-2021.json": f"{base_path}/manifests/source-artifact-2020-2021.json",
+              "SHA256SUMS": f"{base_path}/manifests/SHA256SUMS",
+          }
+
+          def api(url, data, headers):
+              request = urllib.request.Request(url, data=data, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          def commit(path):
+              return {"path": path, "mode": "add", "autorename": False, "mute": True}
+
+          def upload(source, destination):
+              size = source.stat().st_size
+              chunk_size = 8 * 1024 * 1024
+              if size <= 140 * 1024 * 1024:
+                  return api(
+                      "https://content.dropboxapi.com/2/files/upload",
+                      source.read_bytes(),
+                      {
+                          **auth,
+                          "Content-Type": "application/octet-stream",
+                          "Dropbox-API-Arg": json.dumps(commit(destination), ensure_ascii=False),
+                      },
+                  )
+              with source.open("rb") as handle:
+                  first = handle.read(chunk_size)
+                  started = api(
+                      "https://content.dropboxapi.com/2/files/upload_session/start",
+                      first,
+                      {
+                          **auth,
+                          "Content-Type": "application/octet-stream",
+                          "Dropbox-API-Arg": json.dumps({"close": False}),
+                      },
+                  )
+                  session_id = started["session_id"]
+                  offset = len(first)
+                  while offset < size:
+                      chunk = handle.read(chunk_size)
+                      finishing = offset + len(chunk) == size
+                      endpoint = "finish" if finishing else "append_v2"
+                      argument = {"cursor": {"session_id": session_id, "offset": offset}}
+                      if finishing:
+                          argument["commit"] = commit(destination)
+                      else:
+                          argument["close"] = False
+                      result = api(
+                          f"https://content.dropboxapi.com/2/files/upload_session/{endpoint}",
+                          chunk,
+                          {
+                              **auth,
+                              "Content-Type": "application/octet-stream",
+                              "Dropbox-API-Arg": json.dumps(argument, ensure_ascii=False),
+                          },
+                      )
+                      offset += len(chunk)
+                  return result
+
+          uploaded = []
+          for name, destination in destinations.items():
+              source = pathlib.Path("packages") / name
+              result = upload(source, destination)
+              uploaded.append({
+                  "source": str(source),
+                  "destination": result.get("path_display", destination),
+                  "size": result.get("size", source.stat().st_size),
+                  "content_hash": result.get("content_hash"),
+                  "rev": result.get("rev"),
+              })
+              print(f"Uploaded {name} -> {uploaded[-1]['destination']}")
+
+          status_path.write_text(
+              json.dumps({"status": "success", "uploaded": uploaded}, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Publish durable audit evidence
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          DROPBOX_OUTCOME: ${{ steps.dropbox.outcome }}
+        run: |
+          python <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import urllib.error
+          import urllib.request
+
+          def read_json(path, fallback):
+              file = pathlib.Path(path)
+              return json.loads(file.read_text(encoding="utf-8")) if file.exists() else fallback
+
+          packages = []
+          for path in sorted(pathlib.Path("packages").glob("*")) if pathlib.Path("packages").exists() else []:
+              packages.append({"name": path.name, "size": path.stat().st_size})
+          evidence = {
+              "scope": {"years": [2020, 2021], "meets": [1, 2, 3], "planned_units": 2913},
+              "source": read_json("work/selection.json", {"status": "selection_unavailable"}),
+              "technical_audit": read_json(
+                  "output/quality/technical-audit.json",
+                  {"passed": False, "status": "audit_unavailable"},
+              ),
+              "packages": packages,
+              "dropbox_step_outcome": os.environ.get("DROPBOX_OUTCOME", "unknown"),
+              "dropbox": read_json("work/dropbox-status.json", {"status": "not_run"}),
+          }
+          payload = (json.dumps(evidence, ensure_ascii=False, indent=2) + "\n").encode()
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          path = "docs/pilot-audit-2020-2021.json"
+          url = f"https://api.github.com/repos/{repository}/contents/{path}"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+              "User-Agent": "kra-pilot-archiver",
+          }
+          body = {
+              "message": "Record audited 2020-2021 pilot archive evidence",
+              "content": base64.b64encode(payload).decode(),
+              "branch": "main",
+          }
+          try:
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
+                  current = json.load(response)
+              body["sha"] = current["sha"]
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+          request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="PUT")
+          with urllib.request.urlopen(request) as response:
+              result = json.load(response)
+          print(result["content"]["html_url"])
+          PY
+
+      - name: Require Dropbox completion
+        if: ${{ always() }}
+        run: |
+          python <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("work/dropbox-status.json")
+          status = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"status": "not_run"}
+          if status.get("status") != "success":
+              raise SystemExit("Dropbox archive did not complete: " + json.dumps(status, ensure_ascii=False))
+          print("Dropbox archive completed and recorded.")
+          PY
