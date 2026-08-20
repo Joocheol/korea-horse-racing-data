@@ -102,16 +102,21 @@ class ParseTests(unittest.TestCase):
 
 
 class FormatAndPlanningTests(unittest.TestCase):
-    def test_json_is_default_and_api4_3_is_xml(self) -> None:
+    def test_current_endpoint_formats_are_declared(self) -> None:
+        self.assertEqual(ENDPOINTS["results"].service, "API227")
+        self.assertEqual(ENDPOINTS["results"].path, "racedetailresult")
+        self.assertEqual(ENDPOINTS["results"].response_format, "xml")
         self.assertEqual(ENDPOINTS["race_record"].service, "API4_3")
         self.assertEqual(ENDPOINTS["race_record"].response_format, "xml")
         self.assertTrue(all(
             endpoint.response_format == "json"
-            for name, endpoint in ENDPOINTS.items() if name != "race_record"
+            for name, endpoint in ENDPOINTS.items()
+            if name not in {"results", "race_record"}
         ))
 
     def test_raw_extension_follows_response_format(self) -> None:
         self.assertTrue(RequestUnit("race_record", 1, "202001").raw_page_relative_path(1).endswith(".xml"))
+        self.assertTrue(RequestUnit("results", 1, "202001").raw_page_relative_path(1).endswith(".xml"))
         self.assertTrue(RequestUnit("single", 1, "202001").raw_page_relative_path(1).endswith(".json"))
 
     def test_pilot_has_eight_services_and_864_reserved_calls(self) -> None:
