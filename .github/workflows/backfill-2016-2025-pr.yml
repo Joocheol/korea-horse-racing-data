@@ -1,0 +1,264 @@
+name: PR backfill KRA 2016-2025
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: kra-backfill-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: src
+
+jobs:
+  monthly-budget:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/run-backfill-2016-2025'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Guard aggregate monthly-service budgets
+        run: |
+          python <<'PY'
+          import json
+          from kra_data.planning import build_monthly_units
+          from kra_data.preflight import check_budget
+
+          years = (2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025)
+          meets = (1, 2, 3)
+          endpoints = (
+              "single", "double", "triple", "sales", "entries",
+              "race_record", "quinella_crosscheck",
+          )
+          units = []
+          for year in years:
+              units.extend(build_monthly_units(year, year, meets, endpoints))
+          budgets = check_budget(units)
+          report = {
+              "years": list(years),
+              "units": len(units),
+              "budgets": [
+                  {
+                      "service": item.service,
+                      "estimated_calls": item.estimated_calls,
+                      "safety_margin": item.safety_margin,
+                      "daily_limit": item.daily_limit,
+                      "allowed": item.allowed,
+                  }
+                  for item in budgets
+              ],
+          }
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          assert all(item.allowed for item in budgets), report
+          PY
+
+  phase1:
+    needs: monthly-budget
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: kra-collection
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Collect monthly sources first
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+          YEAR: ${{ matrix.year }}
+        run: |
+          python -m kra_data.cli \
+            --start-year "$YEAR" \
+            --end-year "$YEAR" \
+            --meets 1,2,3 \
+            --endpoints single,double,triple,sales,entries,race_record,quinella_crosscheck \
+            --used-json '{}' \
+            --output output \
+            > "phase1-${YEAR}.json"
+      - name: Verify monthly phase
+        env:
+          YEAR: ${{ matrix.year }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          year = os.environ["YEAR"]
+          report = json.loads(Path(f"phase1-{year}.json").read_text())
+          assert report["processed"] == 360, report
+          assert report["phase1_processed"] == 360, report
+          assert report["phase2_processed"] == 0, report
+          assert report["result_dates_discovered"] == 0, report
+          assert report["results_deferred"] is False, report
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+          python -m kra_data.audit --output output
+      - name: Preserve phase-one state
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-phase1-${{ matrix.year }}
+          path: |
+            output
+            phase1-${{ matrix.year }}.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+
+  api227-budget:
+    needs: phase1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Restore all monthly states
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: kra-phase1-*
+          path: phase1
+      - name: Discover all API227 dates and guard the aggregate daily budget
+        run: |
+          python <<'PY'
+          import json
+          from pathlib import Path
+          from kra_data.planning import build_result_units, discover_result_dates
+          from kra_data.preflight import check_budget
+
+          years = (2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025)
+          meets = (1, 2, 3)
+          all_units = []
+          per_year = {}
+          for year in years:
+              output = Path("phase1") / f"kra-phase1-{year}" / "output"
+              dates = discover_result_dates(output, year, year, meets)
+              units = build_result_units(year, year, meets, dates)
+              per_year[str(year)] = len(units)
+              all_units.extend(units)
+
+          # Keep 200 API227 calls unused for manual probes/unexpected retries in addition
+          # to the standard 10% safety margin.
+          budgets = check_budget(all_units, used={"API227": 200}, safety_rate=0.10)
+          report = {
+              "years": list(years),
+              "api227_units_by_year": per_year,
+              "api227_units_total": len(all_units),
+              "reserved_calls": 200,
+              "budgets": [
+                  {
+                      "service": item.service,
+                      "estimated_calls": item.estimated_calls,
+                      "used_calls": item.used_calls,
+                      "safety_margin": item.safety_margin,
+                      "daily_limit": item.daily_limit,
+                      "allowed": item.allowed,
+                  }
+                  for item in budgets
+              ],
+          }
+          Path("api227-budget.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          assert budgets and all(item.allowed for item in budgets), report
+          PY
+      - name: Preserve quota decision
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-api227-budget
+          path: api227-budget.json
+          if-no-files-found: error
+          retention-days: 90
+
+  phase2:
+    needs: api227-budget
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: kra-collection
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Restore this year's monthly state
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kra-phase1-${{ matrix.year }}
+          path: restored
+      - name: Restore output tree
+        run: mv restored/output output
+      - name: Collect API227 only on discovered race days
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+          YEAR: ${{ matrix.year }}
+        run: |
+          python -m kra_data.cli \
+            --start-year "$YEAR" \
+            --end-year "$YEAR" \
+            --meets 1,2,3 \
+            --endpoints race_record,results \
+            --used-json '{}' \
+            --output output \
+            > "phase2-${YEAR}.json"
+      - name: Verify complete two-phase state
+        env:
+          YEAR: ${{ matrix.year }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          year = os.environ["YEAR"]
+          report = json.loads(Path(f"phase2-{year}.json").read_text())
+          assert report["phase1_processed"] == 0, report
+          assert report["phase2_processed"] > 0, report
+          assert report["phase2_selected_units"] == report["result_dates_discovered"], report
+          assert report["results_deferred"] is False, report
+          api227 = [item for item in report["phase2_budget"] if item["service"] == "API227"]
+          assert len(api227) == 1 and api227[0]["allowed"] is True, report
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+          python -m kra_data.audit --output output
+      - name: Preserve completed yearly backfill
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-backfill-${{ matrix.year }}
+          path: |
+            output
+            phase2-${{ matrix.year }}.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
