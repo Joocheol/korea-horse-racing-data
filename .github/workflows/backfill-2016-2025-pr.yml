@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: kra-backfill-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PYTHONPATH: src
@@ -81,20 +81,121 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
-      - name: Collect monthly sources first
+
+      - name: Find prior resumable state
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          YEAR: ${{ matrix.year }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          current_run = int(os.environ["CURRENT_RUN_ID"])
+          year = os.environ["YEAR"]
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "kra-backfill-resume",
+          }
+
+          def artifacts(name):
+              encoded = urllib.parse.quote(name)
+              url = (
+                  f"https://api.github.com/repos/{repository}/actions/artifacts"
+                  f"?name={encoded}&per_page=100"
+              )
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
+                  payload = json.load(response)
+              return [
+                  item for item in payload.get("artifacts", [])
+                  if not item.get("expired")
+                  and int(item.get("workflow_run", {}).get("id", 0)) != current_run
+              ]
+
+          selected = None
+          # A prior backfill artifact contains phase 1 plus any API227 progress,
+          # so prefer it over a phase-1-only artifact.
+          for name in (f"kra-backfill-{year}", f"kra-phase1-{year}"):
+              candidates = artifacts(name)
+              if candidates:
+                  selected = max(candidates, key=lambda item: item.get("created_at", ""))
+                  break
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              if selected is None:
+                  print("run_id=", file=output)
+                  print("artifact_name=", file=output)
+                  print("No prior resumable artifact found")
+              else:
+                  run_id = int(selected["workflow_run"]["id"])
+                  print(f"run_id={run_id}", file=output)
+                  print(f"artifact_name={selected['name']}", file=output)
+                  print(
+                      f"Resume from {selected['name']} artifact {selected['id']} "
+                      f"(run {run_id}, created {selected['created_at']})"
+                  )
+          PY
+
+      - name: Download prior resumable state
+        if: ${{ steps.previous.outputs.run_id != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ steps.previous.outputs.artifact_name }}
+          path: restored
+          run-id: ${{ steps.previous.outputs.run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Restore prior output tree
+        if: ${{ steps.previous.outputs.run_id != '' }}
+        run: |
+          if [ -d restored/output ]; then
+            rm -rf output
+            mv restored/output output
+          else
+            echo "Selected artifact has no output directory" >&2
+            exit 1
+          fi
+
+      - name: Collect monthly sources with resumable retries
         env:
           DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
           YEAR: ${{ matrix.year }}
         run: |
-          python -m kra_data.cli \
-            --start-year "$YEAR" \
-            --end-year "$YEAR" \
-            --meets 1,2,3 \
-            --endpoints single,double,triple,sales,entries,race_record,quinella_crosscheck \
-            --used-json '{}' \
-            --output output \
-            > "phase1-${YEAR}.json"
-      - name: Verify monthly phase
+          set +e
+          status=1
+          for attempt in 1 2 3 4 5; do
+            echo "Phase 1 year=$YEAR attempt=$attempt/5"
+            python -m kra_data.cli \
+              --start-year "$YEAR" \
+              --end-year "$YEAR" \
+              --meets 1,2,3 \
+              --endpoints single,double,triple,sales,entries,race_record,quinella_crosscheck \
+              --used-json '{}' \
+              --output output \
+              > "phase1-${YEAR}.json"
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              delay=$((attempt * 10))
+              echo "Transient collection failure; ledger state is retained. Retry in ${delay}s."
+              sleep "$delay"
+            fi
+          done
+          exit "$status"
+
+      - name: Verify monthly phase from ledger
         env:
           YEAR: ${{ matrix.year }}
         run: |
@@ -102,25 +203,37 @@ jobs:
           import json
           import os
           from pathlib import Path
+          from kra_data.ledger import Ledger
+          from kra_data.planning import build_monthly_units
 
-          year = os.environ["YEAR"]
-          report = json.loads(Path(f"phase1-{year}.json").read_text())
-          assert report["processed"] == 360, report
-          assert report["phase1_processed"] == 360, report
-          assert report["phase2_processed"] == 0, report
-          assert report["result_dates_discovered"] == 0, report
-          assert report["results_deferred"] is False, report
-          print(json.dumps(report, ensure_ascii=False, indent=2))
+          year = int(os.environ["YEAR"])
+          endpoints = (
+              "single", "double", "triple", "sales", "entries",
+              "race_record", "quinella_crosscheck",
+          )
+          expected = build_monthly_units(year, year, (1, 2, 3), endpoints)
+          completed = Ledger(Path("output/ledger.json")).completed()
+          missing = [unit.key for unit in expected if unit.key not in completed]
+          assert len(expected) == 360, len(expected)
+          assert not missing, f"{len(missing)} monthly units remain incomplete; first={missing[:5]}"
+
+          report_path = Path(f"phase1-{year}.json")
+          if report_path.exists() and report_path.stat().st_size:
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              print(json.dumps(report, ensure_ascii=False, indent=2))
+          print(f"Monthly ledger complete: {len(expected)}/{len(expected)} units for {year}")
           PY
           python -m kra_data.audit --output output
-      - name: Preserve phase-one state
+
+      - name: Preserve phase-one state even after failure
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: kra-phase1-${{ matrix.year }}
           path: |
             output
             phase1-${{ matrix.year }}.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
           compression-level: 6
 
@@ -218,20 +331,37 @@ jobs:
           path: restored
       - name: Restore output tree
         run: mv restored/output output
-      - name: Collect API227 only on discovered race days
+
+      - name: Collect API227 with resumable retries
         env:
           DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
           YEAR: ${{ matrix.year }}
         run: |
-          python -m kra_data.cli \
-            --start-year "$YEAR" \
-            --end-year "$YEAR" \
-            --meets 1,2,3 \
-            --endpoints race_record,results \
-            --used-json '{}' \
-            --output output \
-            > "phase2-${YEAR}.json"
-      - name: Verify complete two-phase state
+          set +e
+          status=1
+          for attempt in 1 2 3 4 5; do
+            echo "Phase 2/API227 year=$YEAR attempt=$attempt/5"
+            python -m kra_data.cli \
+              --start-year "$YEAR" \
+              --end-year "$YEAR" \
+              --meets 1,2,3 \
+              --endpoints race_record,results \
+              --used-json '{}' \
+              --output output \
+              > "phase2-${YEAR}.json"
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              delay=$((attempt * 10))
+              echo "Transient API227 failure; ledger state is retained. Retry in ${delay}s."
+              sleep "$delay"
+            fi
+          done
+          exit "$status"
+
+      - name: Verify complete two-phase state from ledger
         env:
           YEAR: ${{ matrix.year }}
         run: |
@@ -239,19 +369,30 @@ jobs:
           import json
           import os
           from pathlib import Path
+          from kra_data.ledger import Ledger
+          from kra_data.planning import build_result_units, discover_result_dates
 
-          year = os.environ["YEAR"]
-          report = json.loads(Path(f"phase2-{year}.json").read_text())
-          assert report["phase1_processed"] == 0, report
-          assert report["phase2_processed"] > 0, report
-          assert report["phase2_selected_units"] == report["result_dates_discovered"], report
-          assert report["results_deferred"] is False, report
-          api227 = [item for item in report["phase2_budget"] if item["service"] == "API227"]
-          assert len(api227) == 1 and api227[0]["allowed"] is True, report
-          print(json.dumps(report, ensure_ascii=False, indent=2))
+          year = int(os.environ["YEAR"])
+          output = Path("output")
+          dates = discover_result_dates(output, year, year, (1, 2, 3))
+          result_units = build_result_units(year, year, (1, 2, 3), dates)
+          completed = Ledger(output / "ledger.json").completed()
+          missing = [unit.key for unit in result_units if unit.key not in completed]
+          assert result_units, "no API227 result units discovered"
+          assert not missing, f"{len(missing)} API227 units remain incomplete; first={missing[:5]}"
+
+          report_path = Path(f"phase2-{year}.json")
+          if report_path.exists() and report_path.stat().st_size:
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              assert report["results_deferred"] is False, report
+              assert report["result_dates_discovered"] == len(result_units), report
+              assert all(item["allowed"] for item in report.get("phase2_budget", [])), report
+              print(json.dumps(report, ensure_ascii=False, indent=2))
+          print(f"API227 ledger complete: {len(result_units)}/{len(result_units)} units for {year}")
           PY
           python -m kra_data.audit --output output
-      - name: Preserve completed yearly backfill
+
+      - name: Preserve completed or partial yearly backfill
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -259,6 +400,6 @@ jobs:
           path: |
             output
             phase2-${{ matrix.year }}.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
           compression-level: 6
