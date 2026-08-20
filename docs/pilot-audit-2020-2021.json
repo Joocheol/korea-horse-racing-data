@@ -1,7 +1,7 @@
 {
   "archive_workflow": {
-    "run_id": 32345013480,
-    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32345013480"
+    "run_id": 32345107334,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32345107334"
   },
   "scope": {
     "years": [
@@ -16,15 +16,66 @@
     "planned_units": 2913
   },
   "source": {
-    "status": "selection_unavailable"
+    "artifact_id": 9396629882,
+    "artifact_name": "kra-collection-state",
+    "artifact_created_at": "2026-08-20T06:59:11Z",
+    "artifact_size_in_bytes": 81069313,
+    "artifact_digest": "sha256:f1136a1d0cecee88ee82b86e779ce3815f6672585e28345fdf8a3e1fa17459d0",
+    "workflow_run_id": 32340684155,
+    "workflow_run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32340684155",
+    "workflow_run_conclusion": "success",
+    "workflow_head_sha": "ed36d5685d09404347bacd8abb16a5262c0bf145"
   },
   "technical_audit": {
-    "passed": false,
-    "status": "audit_unavailable"
+    "audited_complete_units": 2913,
+    "errors": [],
+    "ledger_units": 2913,
+    "passed": true,
+    "state_counts": {
+      "complete": 2913
+    }
   },
-  "packages": [],
-  "dropbox_step_outcome": "skipped",
+  "packages": [
+    {
+      "name": "SHA256SUMS",
+      "size": 670
+    },
+    {
+      "name": "kra-docs-2020-2021.tar.gz",
+      "size": 14260
+    },
+    {
+      "name": "kra-manifests-2020-2021.tar.gz",
+      "size": 135796
+    },
+    {
+      "name": "kra-normalized-2020-2021.tar.gz",
+      "size": 39810364
+    },
+    {
+      "name": "kra-quarantine-2020-2021.tar.gz",
+      "size": 216
+    },
+    {
+      "name": "kra-raw-2020-2021.tar.gz",
+      "size": 40902142
+    },
+    {
+      "name": "source-artifact-2020-2021.json",
+      "size": 501
+    },
+    {
+      "name": "technical-audit-2020-2021.json",
+      "size": 111
+    }
+  ],
+  "dropbox_step_outcome": "failure",
   "dropbox": {
-    "status": "not_run"
+    "status": "missing_secrets",
+    "missing": [
+      "DROPBOX_APP_KEY",
+      "DROPBOX_APP_SECRET",
+      "DROPBOX_REFRESH_TOKEN"
+    ]
   }
 }
