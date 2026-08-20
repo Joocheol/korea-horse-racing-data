@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from urllib.error import URLError
+from unittest.mock import patch
 
 from kra_data.audit import audit_output
 from kra_data.cli import main as collect_main
-from kra_data.client import Page, parse_page, parse_response
+from kra_data.client import KRAClient, Page, parse_page, parse_response
 from kra_data.collector import collect_units
 from kra_data.config import ENDPOINTS
-from kra_data.errors import SchemaError, ValidationError
+from kra_data.errors import SchemaError, TransientAPIError, ValidationError
 from kra_data.ledger import Ledger
 from kra_data.models import RequestUnit
 from kra_data.planning import build_units
 from kra_data.preflight import check_budget, estimate_calls
+from kra_data.probe import main as probe_main
 from kra_data.storage import write_immutable_bytes
 from kra_data.validation import validate_pages
 
@@ -57,6 +63,17 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(SchemaError):
             parse_page({"changed": {}}, 1)
 
+    def test_transport_error_keeps_underlying_reason_without_service_key(self) -> None:
+        def timed_out(*args, **kwargs):
+            raise URLError(TimeoutError("timed out"))
+
+        client = KRAClient("secret-value", max_attempts=1, opener=timed_out)
+        with self.assertRaises(TransientAPIError) as raised:
+            client.fetch_page(RequestUnit("single", 1, "202001"), 1, 10)
+        message = str(raised.exception)
+        self.assertIn("TimeoutError: timed out", message)
+        self.assertNotIn("secret-value", message)
+
 
 class FormatAndPlanningTests(unittest.TestCase):
     def test_json_is_default_and_api4_3_is_xml(self) -> None:
@@ -83,6 +100,28 @@ class FormatAndPlanningTests(unittest.TestCase):
         result = check_budget(units, used={"API28_1": 2_999})
         self.assertFalse(result[0].allowed)
         self.assertTrue(all(endpoint.daily_limit == 3_000 for endpoint in ENDPOINTS.values()))
+
+
+class ProbeTests(unittest.TestCase):
+    def test_probe_fetches_one_page_and_never_prints_service_key(self) -> None:
+        raw = b'{"safe":true}'
+        page = Page(1, 123, [{"id": 1}], raw, "json")
+        output = io.StringIO()
+        with (
+            patch.dict(os.environ, {"PROBE_TEST_KEY": "secret-value"}),
+            patch("kra_data.probe.KRAClient.fetch_page", return_value=page) as fetch,
+            redirect_stdout(output),
+        ):
+            result = probe_main([
+                "--endpoint", "single", "--meet", "1", "--month", "202001",
+                "--num-rows", "10", "--service-key-env", "PROBE_TEST_KEY",
+            ])
+        self.assertEqual(result, 0)
+        fetch.assert_called_once()
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["response"]["total_count"], 123)
+        self.assertEqual(report["response"]["row_count"], 1)
+        self.assertNotIn("secret-value", output.getvalue())
 
 
 class ValidationTests(unittest.TestCase):

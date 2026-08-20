@@ -158,8 +158,16 @@ class KRAClient:
                     error: Exception = TransientAPIError(f"transient HTTP {exc.code}")
                 else:
                     raise PermanentAPIError(f"permanent HTTP {exc.code}") from exc
-            except (URLError, TimeoutError) as exc:
-                error = TransientAPIError(f"temporary transport failure: {type(exc).__name__}")
+            except URLError as exc:
+                reason = exc.reason
+                detail = f"{type(reason).__name__}: {reason}" if reason is not None else "unknown reason"
+                error = TransientAPIError(
+                    f"temporary transport failure: {type(exc).__name__} ({detail})"
+                )
+            except TimeoutError as exc:
+                error = TransientAPIError(
+                    f"temporary transport failure: {type(exc).__name__} ({exc})"
+                )
 
             if attempt == self.max_attempts:
                 raise error

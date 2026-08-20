@@ -31,3 +31,7 @@ PYTHONPATH=src python -m kra_data.preflight \
 
 실제 수집은 push로 시작되지 않습니다. `Collect KRA pilot batch`를 수동 실행하고
 `kra-collection` Environment 승인을 받아야 합니다.
+
+연결 상태와 페이지 크기를 점검할 때는 `Probe one KRA API page`를 실행합니다.
+이 진단 워크플로우는 전체 월을 수집하지 않고 지정한 페이지 한 장만 요청하며,
+인증키를 출력하지 않은 채 행 수·전체 건수·응답 크기·SHA-256을 기록합니다.
