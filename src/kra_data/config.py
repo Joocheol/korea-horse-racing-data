@@ -37,7 +37,7 @@ ENDPOINTS: dict[str, Endpoint] = {
         "entries", "API26_2", "API26_2/entrySheet_2", (None,)
     ),
     "results": Endpoint(
-        "results", "API227", "racedetailresult", (None,), response_format="xml"
+        "results", "API227", "racedetailresult/getracedetailresult", (None,), response_format="xml"
     ),
     "race_record": Endpoint(
         "race_record", "API4_3", "API4_3/raceResult_3", (None,), response_format="xml"
