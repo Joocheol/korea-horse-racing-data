@@ -8,7 +8,7 @@ from typing import Iterable
 
 from .config import DEFAULT_ENDPOINTS, ENDPOINTS, MEETS
 from .models import RequestUnit
-from .planning import build_units
+from .planning import build_monthly_units
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def make_plan(args: argparse.Namespace) -> tuple[list[RequestUnit], list[BudgetResult]]:
-    units = build_units(
+    units = build_monthly_units(
         args.start_year, args.end_year, _csv_ints(args.meets), _csv_strings(args.endpoints)
     )
     if args.max_units is not None:
@@ -84,12 +84,15 @@ def make_plan(args: argparse.Namespace) -> tuple[list[RequestUnit], list[BudgetR
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    endpoint_names = _csv_strings(args.endpoints)
     units, budgets = make_plan(args)
     report = {
+        "phase": "monthly",
         "units": len(units),
         "first_unit": units[0].key if units else None,
         "last_unit": units[-1].key if units else None,
         "estimated_calls_total": sum(item.estimated_calls for item in budgets),
+        "api227_deferred_until_race_day_discovery": "results" in endpoint_names,
         "budgets": [
             {
                 "service": item.service,
