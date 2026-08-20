@@ -104,7 +104,10 @@ class ParseTests(unittest.TestCase):
 class FormatAndPlanningTests(unittest.TestCase):
     def test_current_endpoint_formats_are_declared(self) -> None:
         self.assertEqual(ENDPOINTS["results"].service, "API227")
-        self.assertEqual(ENDPOINTS["results"].path, "racedetailresult")
+        self.assertEqual(
+            ENDPOINTS["results"].path,
+            "racedetailresult/getracedetailresult",
+        )
         self.assertEqual(ENDPOINTS["results"].response_format, "xml")
         self.assertEqual(ENDPOINTS["race_record"].service, "API4_3")
         self.assertEqual(ENDPOINTS["race_record"].response_format, "xml")
