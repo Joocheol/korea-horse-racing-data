@@ -1,7 +1,7 @@
 {
   "archive_workflow": {
-    "run_id": 32345107334,
-    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32345107334"
+    "run_id": 32345333716,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32345333716"
   },
   "scope": {
     "years": [
@@ -42,7 +42,7 @@
     },
     {
       "name": "kra-docs-2020-2021.tar.gz",
-      "size": 14260
+      "size": 14691
     },
     {
       "name": "kra-manifests-2020-2021.tar.gz",
@@ -50,7 +50,7 @@
     },
     {
       "name": "kra-normalized-2020-2021.tar.gz",
-      "size": 39810364
+      "size": 39808145
     },
     {
       "name": "kra-quarantine-2020-2021.tar.gz",
@@ -58,7 +58,7 @@
     },
     {
       "name": "kra-raw-2020-2021.tar.gz",
-      "size": 40902142
+      "size": 40900666
     },
     {
       "name": "source-artifact-2020-2021.json",
