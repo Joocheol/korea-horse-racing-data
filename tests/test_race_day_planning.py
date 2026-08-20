@@ -125,8 +125,16 @@ class RaceDayPlanningTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertEqual(report["phase1_processed"], 12)
             self.assertEqual(report["phase2_processed"], 1)
+            self.assertEqual(report["phase2_selected_units"], 1)
             self.assertEqual(report["result_dates_discovered"], 1)
             self.assertFalse(report["results_deferred"])
+            self.assertEqual(len(report["phase2_budget"]), 1)
+            api227_budget = report["phase2_budget"][0]
+            self.assertEqual(api227_budget["service"], "API227")
+            self.assertEqual(api227_budget["estimated_calls"], 1)
+            self.assertEqual(api227_budget["safety_margin"], 1)
+            self.assertEqual(api227_budget["daily_limit"], 3000)
+            self.assertTrue(api227_budget["allowed"])
             result_calls = [key for key in FakeClient.calls if ":results:" in key]
             self.assertEqual(result_calls, ["20200104:m1:results:-"])
 
