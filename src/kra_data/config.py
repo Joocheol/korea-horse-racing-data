@@ -37,7 +37,7 @@ ENDPOINTS: dict[str, Endpoint] = {
         "entries", "API26_2", "API26_2/entrySheet_2", (None,)
     ),
     "results": Endpoint(
-        "results", "API214_1", "API214_1/RaceDetailResult_1", (None,)
+        "results", "API227", "racedetailresult", (None,), response_format="xml"
     ),
     "race_record": Endpoint(
         "race_record", "API4_3", "API4_3/raceResult_3", (None,), response_format="xml"
@@ -49,4 +49,4 @@ ENDPOINTS: dict[str, Endpoint] = {
 
 DEFAULT_ENDPOINTS = tuple(ENDPOINTS)
 MEETS = (1, 2, 3)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
