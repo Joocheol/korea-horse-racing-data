@@ -79,7 +79,7 @@ endpoints contribute.
 | Pool turnover and winning dividends | `API179_1/salesAndDividendRate_1` | 15057896 |
 | Quinella dividends (duplicate source) | `API5/quinellaOddsInfo` | 15057090 |
 | Entry sheet, field size | `API26_2/entrySheet_2` | 15058677 |
-| Race result detail, finishing order | `API214_1/RaceDetailResult_1` | 15119524 |
+| Race result detail, finishing order | `API227/racedetailresult` | 15119524 |
 | Race records | `API4_3/raceResult_3` | 15058305 |
 
 Base URL `https://apis.data.go.kr/B551015`. Requests are parameterised by
