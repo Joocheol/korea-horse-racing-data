@@ -13,7 +13,7 @@ from .planning import build_units
 
 @dataclass(frozen=True)
 class BudgetResult:
-    endpoint: str
+    service: str
     estimated_calls: int
     used_calls: int
     safety_margin: int
@@ -27,9 +27,10 @@ class BudgetResult:
 def estimate_calls(units: Iterable[RequestUnit]) -> Counter[str]:
     counts: Counter[str] = Counter()
     for unit in units:
-        # TRI months can exceed 100,000 rows. Conservatively reserve two pages.
-        calls = 2 if unit.endpoint == "triple" and unit.pool == "TRI" else 1
-        counts[unit.endpoint] += calls
+        endpoint = ENDPOINTS[unit.endpoint]
+        # API30_1 TRI can exceed numOfRows=100,000 in a busy month.
+        calls = 2 if endpoint.service == "API30_1" and unit.pool == "TRI" else 1
+        counts[endpoint.service] += calls
     return counts
 
 
@@ -38,11 +39,12 @@ def check_budget(
 ) -> list[BudgetResult]:
     used = used or {}
     estimates = estimate_calls(units)
+    limits = {endpoint.service: endpoint.daily_limit for endpoint in ENDPOINTS.values()}
     results: list[BudgetResult] = []
-    for name, estimated in sorted(estimates.items()):
+    for service, estimated in sorted(estimates.items()):
         margin = max(1, int(estimated * safety_rate + 0.9999))
         results.append(
-            BudgetResult(name, estimated, int(used.get(name, 0)), margin, ENDPOINTS[name].daily_limit)
+            BudgetResult(service, estimated, int(used.get(service, 0)), margin, limits[service])
         )
     return results
 
@@ -68,10 +70,7 @@ def parser() -> argparse.ArgumentParser:
 
 def make_plan(args: argparse.Namespace) -> tuple[list[RequestUnit], list[BudgetResult]]:
     units = build_units(
-        args.start_year,
-        args.end_year,
-        _csv_ints(args.meets),
-        _csv_strings(args.endpoints),
+        args.start_year, args.end_year, _csv_ints(args.meets), _csv_strings(args.endpoints)
     )
     if args.max_units is not None:
         if args.max_units < 1:
@@ -90,9 +89,10 @@ def main(argv: list[str] | None = None) -> int:
         "units": len(units),
         "first_unit": units[0].key if units else None,
         "last_unit": units[-1].key if units else None,
+        "estimated_calls_total": sum(item.estimated_calls for item in budgets),
         "budgets": [
             {
-                "endpoint": item.endpoint,
+                "service": item.service,
                 "estimated_calls": item.estimated_calls,
                 "used_calls": item.used_calls,
                 "safety_margin": item.safety_margin,

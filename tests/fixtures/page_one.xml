@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header>
+  <body>
+    <items><item><meet>1</meet><rcDate>20200104</rcDate><rcNo>1</rcNo><hrNo>1</hrNo></item></items>
+    <pageNo>1</pageNo><numOfRows>1</numOfRows><totalCount>1</totalCount>
+  </body>
+</response>

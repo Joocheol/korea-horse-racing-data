@@ -18,13 +18,13 @@ on:
       endpoints:
         description: Comma-separated endpoint names
         required: true
-        default: "single,double,triple,sales,entries,results"
+        default: "single,double,triple,sales,entries,results,race_record,quinella_crosscheck"
       max_units:
         description: Maximum pending ledger units in this approved batch
         required: true
         default: "20"
       used_json:
-        description: API calls already used today, as JSON
+        description: Calls already used today keyed by API service, as JSON
         required: true
         default: "{}"
       resume_run_id:

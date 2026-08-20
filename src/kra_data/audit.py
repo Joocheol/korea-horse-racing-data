@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .client import Page
+from .client import parse_response
 from .storage import atomic_write_bytes, canonical_json, sha256_bytes
 from .validation import validate_pages
 
@@ -27,20 +27,18 @@ def audit_output(output: Path) -> dict[str, Any]:
         if record.get("state") != "complete":
             errors.append(f"{key}: state={record.get('state')}")
             continue
-        raw_path = output / str(record.get("raw_path", ""))
-        if not raw_path.is_file():
-            errors.append(f"{key}: raw file missing")
+        raw_files = record.get("raw_files")
+        if not isinstance(raw_files, list) or not raw_files:
+            errors.append(f"{key}: raw file manifest missing")
             continue
-        raw_bytes = raw_path.read_bytes()
-        if sha256_bytes(raw_bytes) != record.get("raw_sha256"):
-            errors.append(f"{key}: raw checksum mismatch")
-            continue
-        payload = json.loads(raw_bytes)
+        pages = []
         try:
-            pages = [
-                Page(int(page["page_no"]), int(page["total_count"]), list(page["rows"]))
-                for page in payload["pages"]
-            ]
+            for raw_file in sorted(raw_files, key=lambda item: int(item["page_no"])):
+                raw_path = output / str(raw_file["path"])
+                raw_bytes = raw_path.read_bytes()
+                if sha256_bytes(raw_bytes) != raw_file.get("sha256"):
+                    raise ValueError(f"raw checksum mismatch: {raw_file['path']}")
+                pages.append(parse_response(raw_bytes, str(raw_file["format"]), int(raw_file["page_no"])))
             summary = validate_pages(pages)
         except Exception as exc:
             errors.append(f"{key}: {type(exc).__name__}: {exc}")
@@ -52,9 +50,7 @@ def audit_output(output: Path) -> dict[str, Any]:
         if not staged_path.is_file():
             errors.append(f"{key}: staged file missing")
             continue
-        expected_staged = b"".join(
-            canonical_json(row) + b"\n" for page in pages for row in page.rows
-        )
+        expected_staged = b"".join(canonical_json(row) + b"\n" for page in pages for row in page.rows)
         if staged_path.read_bytes() != expected_staged:
             errors.append(f"{key}: staged content mismatch")
             continue
@@ -67,8 +63,7 @@ def audit_output(output: Path) -> dict[str, Any]:
         "errors": errors,
         "passed": not errors,
     }
-    report_path = output / "quality" / "technical-audit.json"
-    atomic_write_bytes(report_path, canonical_json(report) + b"\n")
+    atomic_write_bytes(output / "quality" / "technical-audit.json", canonical_json(report) + b"\n")
     return report
 
 

@@ -4,7 +4,8 @@
 
 이 문서는 KRA 공개 API 수집의 운영 규칙과 단계별 통과 기준을 정한다.
 API의 사실관계와 필드 정의는 [API_FINDINGS.md](API_FINDINGS.md), 2020·2021년
-범위는 [PILOT_2020_2021.md](PILOT_2020_2021.md)를 따른다. 문서가 충돌하면
+범위는 [PILOT_2020_2021.md](PILOT_2020_2021.md), API별 형식·호출량·Dropbox 경로는
+[COLLECTION_FORMATS.md](COLLECTION_FORMATS.md)를 따른다. 문서가 충돌하면
 API_FINDINGS의 최신 변경 이력을 우선한다. 특히 개최일을 요일로 거르지 않는다.
 
 ## 1. 기본 원칙
@@ -63,10 +64,11 @@ Secret 값은 출력하지 않는다.
 
 | 계층 | 내용 | 변경 규칙 |
 | --- | --- | --- |
-| `raw` | API 응답 그대로 | 불변; 덮어쓰기 금지 |
+| `raw` | 페이지별 API 원응답 바이트 (`.json`/`.xml`) | 불변; 파싱 후 재조립·덮어쓰기 금지 |
 | `staged` | 형 변환, 표준 열, 중복 표시 | raw에서 재생성 가능 |
 | `curated` | 판정과 품질검사를 통과한 분석 자료 | staged에서 재생성 가능 |
 
+Dropbox 사용자 표시 경로는 `/앱/kra-data/`이며 기존 앱 폴더 아래에 중첩하지 않는다.
 각 산출물은 요청 파라미터, collector SHA, schema version, 원천 파일 체크섬과 연결한다.
 중복은 raw에서 삭제하지 않는다. staged에서 탐지·분류하고 설명되지 않은 중복이
 있으면 해당 수집 단위를 실패 처리한다.

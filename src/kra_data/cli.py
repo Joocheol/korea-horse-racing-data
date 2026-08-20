@@ -28,16 +28,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    units = build_units(
-        args.start_year,
-        args.end_year,
-        _csv_ints(args.meets),
-        _csv_strings(args.endpoints),
-    )
+    units = build_units(args.start_year, args.end_year, _csv_ints(args.meets), _csv_strings(args.endpoints))
     if args.max_units is not None and args.max_units < 1:
         raise SystemExit("max_units must be positive")
-    ledger = Ledger(args.output / "ledger.json")
-    completed = ledger.completed()
+    completed = Ledger(args.output / "ledger.json").completed()
     pending = [unit for unit in units if unit.key not in completed]
     selected = pending[: args.max_units] if args.max_units is not None else pending
     used = json.loads(args.used_json)
@@ -47,9 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     service_key = os.environ.get(args.service_key_env, "")
     if not service_key:
         raise SystemExit(f"required secret is missing: {args.service_key_env}")
-    processed, skipped = collect_units(
-        KRAClient(service_key), selected, args.output
-    )
+    processed, skipped = collect_units(KRAClient(service_key), selected, args.output)
     print(json.dumps({"processed": processed, "skipped": skipped}, ensure_ascii=False))
     return 0
 

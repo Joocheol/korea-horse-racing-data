@@ -7,27 +7,31 @@ from pathlib import Path
 from typing import Iterable
 
 from .client import KRAClient, Page
-from .config import SCHEMA_VERSION
+from .config import ENDPOINTS, SCHEMA_VERSION
 from .ledger import Ledger
 from .models import RequestUnit
-from .storage import atomic_write_bytes, canonical_json, write_immutable_json
+from .storage import atomic_write_bytes, canonical_json, write_immutable_bytes
 from .validation import ValidationSummary, validate_pages
 
 
-def _raw_payload(unit: RequestUnit, pages: list[Page]) -> dict[str, object]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "request": {
-            "endpoint": unit.endpoint,
-            "meet": unit.meet,
-            "month": unit.month,
-            "pool": unit.pool,
-        },
-        "pages": [
-            {"page_no": page.page_no, "total_count": page.total_count, "rows": page.rows}
-            for page in pages
-        ],
-    }
+def _write_raw_pages(output_dir: Path, unit: RequestUnit, pages: list[Page], prefix: str) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    expected_format = ENDPOINTS[unit.endpoint].response_format
+    for page in pages:
+        if not page.raw_body:
+            raise ValueError("raw response bytes are required")
+        if page.response_format != expected_format:
+            raise ValueError(f"unexpected response format: {page.response_format}")
+        relative = f"{prefix}/{unit.raw_page_relative_path(page.page_no)}"
+        digest = write_immutable_bytes(output_dir / relative, page.raw_body)
+        records.append({
+            "page_no": page.page_no,
+            "path": relative,
+            "sha256": digest,
+            "format": page.response_format,
+            "bytes": len(page.raw_body),
+        })
+    return records
 
 
 def collect_one(
@@ -39,48 +43,53 @@ def collect_one(
     collector_sha: str,
     num_rows: int = 100_000,
 ) -> ValidationSummary:
-    raw_path = output_dir / "raw" / unit.relative_path
+    endpoint = ENDPOINTS[unit.endpoint]
     ledger.update(
         unit.key,
         "running",
-        request={"endpoint": unit.endpoint, "meet": unit.meet, "month": unit.month, "pool": unit.pool},
+        request={
+            "endpoint": unit.endpoint,
+            "service": endpoint.service,
+            "format": endpoint.response_format,
+            "meet": unit.meet,
+            "month": unit.month,
+            "pool": unit.pool,
+        },
         collector_sha=collector_sha,
         schema_version=SCHEMA_VERSION,
-        raw_path=str(raw_path.relative_to(output_dir)),
     )
     captured_pages: list[Page] = []
     try:
         pages = client.collect_unit(unit, num_rows=num_rows, on_page=captured_pages.append)
         ledger.update(unit.key, "validating", page_count=len(pages))
-        raw_sha256 = write_immutable_json(raw_path, _raw_payload(unit, pages))
+        raw_files = _write_raw_pages(output_dir, unit, pages, "raw")
         summary = validate_pages(pages)
-        staged_path = output_dir / "staged" / unit.relative_path.replace(".json", ".jsonl")
+        staged_relative = f"staged/{unit.staged_relative_path}"
         rows = [row for page in pages for row in page.rows]
         staged_bytes = b"".join(canonical_json(row) + b"\n" for row in rows)
-        atomic_write_bytes(staged_path, staged_bytes)
+        atomic_write_bytes(output_dir / staged_relative, staged_bytes)
         ledger.update(
             unit.key,
             "complete",
-            raw_sha256=raw_sha256,
-            staged_path=str(staged_path.relative_to(output_dir)),
+            raw_files=raw_files,
+            staged_path=staged_relative,
             **asdict(summary),
         )
         return summary
     except Exception as exc:
-        failure_path: str | None = None
+        partial_raw_paths: list[dict[str, object]] = []
         if captured_pages:
             run_id = os.environ.get("GITHUB_RUN_ID", "local")
             attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
-            path = output_dir / "failures" / f"run-{run_id}-attempt-{attempt}" / unit.relative_path
-            write_immutable_json(path, _raw_payload(unit, captured_pages))
-            failure_path = str(path.relative_to(output_dir))
+            prefix = f"failures/run-{run_id}-attempt-{attempt}"
+            partial_raw_paths = _write_raw_pages(output_dir, unit, captured_pages, prefix)
         ledger.update(
             unit.key,
             "failed",
             error_type=type(exc).__name__,
             error=str(exc),
             traceback="".join(traceback.format_exception_only(type(exc), exc)).strip(),
-            partial_raw_path=failure_path,
+            partial_raw_paths=partial_raw_paths,
             partial_page_count=len(captured_pages),
         )
         raise

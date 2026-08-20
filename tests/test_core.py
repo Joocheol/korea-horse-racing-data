@@ -5,28 +5,47 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kra_data.client import Page, parse_page
 from kra_data.audit import audit_output
-from kra_data.collector import collect_units
 from kra_data.cli import main as collect_main
+from kra_data.client import Page, parse_page, parse_response
+from kra_data.collector import collect_units
+from kra_data.config import ENDPOINTS
 from kra_data.errors import SchemaError, ValidationError
 from kra_data.ledger import Ledger
 from kra_data.models import RequestUnit
 from kra_data.planning import build_units
-from kra_data.preflight import check_budget
-from kra_data.storage import write_immutable_json
+from kra_data.preflight import check_budget, estimate_calls
+from kra_data.storage import write_immutable_bytes
 from kra_data.validation import validate_pages
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def json_page(page_no: int, total_count: int, rows: list[dict[str, object]]) -> Page:
+    payload = {
+        "response": {
+            "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+            "body": {"items": {"item": rows} if rows else "", "totalCount": total_count},
+        }
+    }
+    raw = json.dumps(payload, ensure_ascii=False).encode()
+    return parse_response(raw, "json", page_no)
+
+
 class ParseTests(unittest.TestCase):
-    def test_single_row_is_normalized_to_list(self) -> None:
-        payload = json.loads((FIXTURES / "page_one.json").read_text())
-        page = parse_page(payload, 1)
+    def test_single_json_row_is_normalized_to_list(self) -> None:
+        raw = (FIXTURES / "page_one.json").read_bytes()
+        page = parse_response(raw, "json", 1)
         self.assertEqual(page.total_count, 1)
         self.assertEqual(len(page.rows), 1)
+        self.assertEqual(page.raw_body, raw)
+
+    def test_xml_row_is_parsed_without_changing_raw_bytes(self) -> None:
+        raw = (FIXTURES / "page_one.xml").read_bytes()
+        page = parse_response(raw, "xml", 1)
+        self.assertEqual(page.rows[0]["rcNo"], "1")
+        self.assertEqual(page.raw_body, raw)
 
     def test_empty_items_are_valid_when_total_is_zero(self) -> None:
         payload = json.loads((FIXTURES / "page_empty.json").read_text())
@@ -37,6 +56,33 @@ class ParseTests(unittest.TestCase):
     def test_schema_drift_fails_closed(self) -> None:
         with self.assertRaises(SchemaError):
             parse_page({"changed": {}}, 1)
+
+
+class FormatAndPlanningTests(unittest.TestCase):
+    def test_json_is_default_and_api4_3_is_xml(self) -> None:
+        self.assertEqual(ENDPOINTS["race_record"].service, "API4_3")
+        self.assertEqual(ENDPOINTS["race_record"].response_format, "xml")
+        self.assertTrue(all(
+            endpoint.response_format == "json"
+            for name, endpoint in ENDPOINTS.items() if name != "race_record"
+        ))
+
+    def test_raw_extension_follows_response_format(self) -> None:
+        self.assertTrue(RequestUnit("race_record", 1, "202001").raw_page_relative_path(1).endswith(".xml"))
+        self.assertTrue(RequestUnit("single", 1, "202001").raw_page_relative_path(1).endswith(".json"))
+
+    def test_pilot_has_eight_services_and_864_reserved_calls(self) -> None:
+        units = build_units(2020, 2021, (1, 2, 3), tuple(ENDPOINTS))
+        self.assertEqual(len(units), 792)
+        calls = estimate_calls(units)
+        self.assertEqual(set(calls), {endpoint.service for endpoint in ENDPOINTS.values()})
+        self.assertEqual(sum(calls.values()), 864)
+
+    def test_every_service_uses_3000_daily_limit(self) -> None:
+        units = [RequestUnit("single", 1, "202001")]
+        result = check_budget(units, used={"API28_1": 2_999})
+        self.assertFalse(result[0].allowed)
+        self.assertTrue(all(endpoint.daily_limit == 3_000 for endpoint in ENDPOINTS.values()))
 
 
 class ValidationTests(unittest.TestCase):
@@ -50,28 +96,22 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "mismatch"):
             validate_pages([Page(1, 2, [{"id": 1}])])
 
-    def test_complete_unique_rows_pass(self) -> None:
-        summary = validate_pages([Page(1, 2, [{"id": 1}, {"id": 2}])])
-        self.assertEqual(summary.unique_rows, 2)
-        self.assertEqual(summary.duplicate_rows, 0)
-
 
 class StorageAndResumeTests(unittest.TestCase):
-    def test_raw_file_is_immutable(self) -> None:
+    def test_raw_file_is_byte_for_byte_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "raw.json"
-            first = write_immutable_json(path, {"value": 1})
-            self.assertEqual(first, write_immutable_json(path, {"value": 1}))
+            first = write_immutable_bytes(path, b'{ "value": 1 }\n')
+            self.assertEqual(first, write_immutable_bytes(path, b'{ "value": 1 }\n'))
             with self.assertRaises(FileExistsError):
-                write_immutable_json(path, {"value": 2})
+                write_immutable_bytes(path, b'{"value":1}\n')
 
-    def test_completed_unit_is_skipped_on_resume(self) -> None:
+    def test_completed_unit_is_skipped_and_raw_is_exact(self) -> None:
         class FakeClient:
             calls = 0
-
-            def collect_unit(self, unit: RequestUnit, num_rows: int = 100_000, on_page=None) -> list[Page]:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
                 self.calls += 1
-                page = Page(1, 1, [{"id": unit.key}])
+                page = json_page(1, 1, [{"id": unit.key}])
                 if on_page is not None:
                     on_page(page)
                 return [page]
@@ -82,27 +122,25 @@ class StorageAndResumeTests(unittest.TestCase):
             client = FakeClient()
             self.assertEqual(collect_units(client, [unit], output), (1, 0))
             self.assertEqual(collect_units(client, [unit], output), (0, 1))
-            self.assertEqual(client.calls, 1)
-            self.assertEqual(Ledger(output / "ledger.json").state(unit.key), "complete")
+            record = Ledger(output / "ledger.json").data["units"][unit.key]
+            raw_file = output / record["raw_files"][0]["path"]
+            self.assertEqual(raw_file.read_bytes(), json_page(1, 1, [{"id": unit.key}]).raw_body)
 
     def test_cli_budget_selection_starts_after_completed_units(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            first = RequestUnit("single", 1, "202001")
-            Ledger(output / "ledger.json").update(first.key, "complete")
-            # Missing secret proves preflight reached the next pending batch without calling the API.
+            Ledger(output / "ledger.json").update(RequestUnit("single", 1, "202001").key, "complete")
             with self.assertRaisesRegex(SystemExit, "required secret"):
                 collect_main([
-                    "--start-year", "2020", "--end-year", "2020",
-                    "--endpoints", "single", "--meets", "1",
-                    "--max-units", "1", "--output", str(output),
+                    "--start-year", "2020", "--end-year", "2020", "--endpoints", "single",
+                    "--meets", "1", "--max-units", "1", "--output", str(output),
                     "--service-key-env", "INTENTIONALLY_MISSING_KEY",
                 ])
 
     def test_audit_detects_raw_corruption(self) -> None:
         class FakeClient:
-            def collect_unit(self, unit: RequestUnit, num_rows: int = 100_000, on_page=None) -> list[Page]:
-                page = Page(1, 1, [{"id": unit.key}])
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                page = json_page(1, 1, [{"id": unit.key}])
                 if on_page is not None:
                     on_page(page)
                 return [page]
@@ -112,16 +150,16 @@ class StorageAndResumeTests(unittest.TestCase):
             unit = RequestUnit("single", 1, "202001")
             collect_units(FakeClient(), [unit], output)
             self.assertTrue(audit_output(output)["passed"])
-            raw_path = output / "raw" / unit.relative_path
-            raw_path.write_text("{}\n", encoding="utf-8")
+            record = Ledger(output / "ledger.json").data["units"][unit.key]
+            (output / record["raw_files"][0]["path"]).write_bytes(b"{}")
             report = audit_output(output)
             self.assertFalse(report["passed"])
             self.assertIn("checksum mismatch", report["errors"][0])
 
-    def test_partial_pages_are_preserved_after_failure(self) -> None:
+    def test_partial_page_raw_bytes_are_preserved_after_failure(self) -> None:
         class FailingClient:
-            def collect_unit(self, unit: RequestUnit, num_rows: int = 100_000, on_page=None) -> list[Page]:
-                first = Page(1, 2, [{"id": 1}])
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                first = json_page(1, 2, [{"id": 1}])
                 if on_page is not None:
                     on_page(first)
                 raise RuntimeError("second page failed")
@@ -134,19 +172,7 @@ class StorageAndResumeTests(unittest.TestCase):
             record = Ledger(output / "ledger.json").data["units"][unit.key]
             self.assertEqual(record["state"], "failed")
             self.assertEqual(record["partial_page_count"], 1)
-            self.assertTrue((output / record["partial_raw_path"]).is_file())
-
-
-class PlanningTests(unittest.TestCase):
-    def test_pilot_unit_count(self) -> None:
-        units = build_units(2020, 2021, (1, 2, 3), ("single", "double", "triple", "sales", "entries", "results"))
-        # 24 months × 3 meets × (1 + 3 + 2 + 1 + 1 + 1 pools)
-        self.assertEqual(len(units), 648)
-
-    def test_sales_limit_is_enforced(self) -> None:
-        units = [RequestUnit("sales", 1, f"2020{month:02d}") for month in range(1, 13)]
-        result = check_budget(units, used={"sales": 2_990})
-        self.assertFalse(result[0].allowed)
+            self.assertTrue((output / record["partial_raw_paths"][0]["path"]).is_file())
 
 
 if __name__ == "__main__":

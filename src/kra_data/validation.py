@@ -37,10 +37,4 @@ def validate_pages(pages: list[Page]) -> ValidationSummary:
         )
     if duplicate_rows:
         raise ValidationError(f"unexplained duplicate rows: {duplicate_rows}")
-    return ValidationSummary(
-        total_count=total_count,
-        raw_rows=len(rows),
-        unique_rows=unique_rows,
-        duplicate_rows=duplicate_rows,
-        page_count=len(pages),
-    )
+    return ValidationSummary(total_count, len(rows), unique_rows, duplicate_rows, len(pages))

@@ -35,13 +35,15 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
-def write_immutable_json(path: Path, value: Any) -> str:
-    data = canonical_json(value) + b"\n"
+def write_immutable_bytes(path: Path, data: bytes) -> str:
     digest = sha256_bytes(data)
     if path.exists():
-        existing = path.read_bytes()
-        if sha256_bytes(existing) != digest:
+        if sha256_bytes(path.read_bytes()) != digest:
             raise FileExistsError(f"immutable raw file already exists with different content: {path}")
         return digest
     atomic_write_bytes(path, data)
     return digest
+
+
+def write_immutable_json(path: Path, value: Any) -> str:
+    return write_immutable_bytes(path, canonical_json(value) + b"\n")

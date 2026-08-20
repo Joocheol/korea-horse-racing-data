@@ -20,7 +20,7 @@ class Ledger:
                 raise ValueError("invalid ledger format")
             self.data = loaded
         else:
-            self.data: dict[str, Any] = {"schema_version": 1, "units": {}}
+            self.data: dict[str, Any] = {"schema_version": 2, "units": {}}
 
     def state(self, key: str) -> str:
         return str(self.data["units"].get(key, {}).get("state", "pending"))
@@ -30,13 +30,7 @@ class Ledger:
             raise ValueError(f"invalid ledger state: {state}")
         current = dict(self.data["units"].get(key, {}))
         if state == "complete":
-            for stale in (
-                "error_type",
-                "error",
-                "traceback",
-                "partial_raw_path",
-                "partial_page_count",
-            ):
+            for stale in ("error_type", "error", "traceback", "partial_raw_paths", "partial_page_count"):
                 current.pop(stale, None)
         current.update(fields)
         current["state"] = state
@@ -45,6 +39,4 @@ class Ledger:
         atomic_write_bytes(self.path, canonical_json(self.data) + b"\n")
 
     def completed(self) -> set[str]:
-        return {
-            key for key, value in self.data["units"].items() if value.get("state") == "complete"
-        }
+        return {key for key, value in self.data["units"].items() if value.get("state") == "complete"}

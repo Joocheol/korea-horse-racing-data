@@ -27,15 +27,24 @@ class RequestUnit:
         return f"{self.month}:m{self.meet}:{self.endpoint}:{self.pool or '-'}"
 
     @property
-    def relative_path(self) -> str:
+    def raw_relative_dir(self) -> str:
         pool = (self.pool or "all").lower()
-        return f"{self.month[:4]}/{self.month}/meet-{self.meet}/{self.endpoint}-{pool}.json"
+        return f"{self.month[:4]}/{self.month}/meet-{self.meet}/{self.endpoint}-{pool}"
+
+    @property
+    def staged_relative_path(self) -> str:
+        return f"{self.raw_relative_dir}.jsonl"
+
+    def raw_page_relative_path(self, page_no: int) -> str:
+        extension = ENDPOINTS[self.endpoint].response_format
+        return f"{self.raw_relative_dir}/page-{page_no:05d}.{extension}"
 
     def params(self, *, page_no: int, num_rows: int) -> dict[str, str | int]:
+        endpoint = ENDPOINTS[self.endpoint]
         values: dict[str, str | int] = {
             "pageNo": page_no,
             "numOfRows": num_rows,
-            "_type": "json",
+            "_type": endpoint.response_format,
             "meet": self.meet,
             "rc_month": self.month,
         }
