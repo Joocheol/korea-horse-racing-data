@@ -1,0 +1,26 @@
+{
+  "scope": {
+    "years": [
+      2020,
+      2021
+    ],
+    "meets": [
+      1,
+      2,
+      3
+    ],
+    "planned_units": 2913
+  },
+  "source": {
+    "status": "selection_unavailable"
+  },
+  "technical_audit": {
+    "passed": false,
+    "status": "audit_unavailable"
+  },
+  "packages": [],
+  "dropbox_step_outcome": "skipped",
+  "dropbox": {
+    "status": "not_run"
+  }
+}
