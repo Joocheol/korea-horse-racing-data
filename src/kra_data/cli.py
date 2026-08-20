@@ -9,7 +9,12 @@ from .client import KRAClient
 from .collector import collect_units
 from .config import DEFAULT_ENDPOINTS, MEETS
 from .ledger import Ledger
-from .planning import build_units
+from .planning import (
+    build_monthly_units,
+    build_result_units,
+    discover_result_dates,
+    race_record_coverage_complete,
+)
 from .preflight import _csv_ints, _csv_strings, check_budget
 
 
@@ -26,23 +31,93 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def _selected_pending(
+    units,
+    completed: set[str],
+    remaining: int | None,
+):
+    pending = [unit for unit in units if unit.key not in completed]
+    return pending if remaining is None else pending[:remaining]
+
+
+def _enforce_budget(selected, used: dict[str, int]) -> None:
+    budgets = check_budget(selected, used)
+    if not all(item.allowed for item in budgets):
+        blocked = ", ".join(item.service for item in budgets if not item.allowed)
+        raise SystemExit(f"preflight blocked collection: API budget exceeded ({blocked})")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    units = build_units(args.start_year, args.end_year, _csv_ints(args.meets), _csv_strings(args.endpoints))
     if args.max_units is not None and args.max_units < 1:
         raise SystemExit("max_units must be positive")
-    completed = Ledger(args.output / "ledger.json").completed()
-    pending = [unit for unit in units if unit.key not in completed]
-    selected = pending[: args.max_units] if args.max_units is not None else pending
-    used = json.loads(args.used_json)
-    budgets = check_budget(selected, {str(k): int(v) for k, v in used.items()})
-    if not all(item.allowed for item in budgets):
-        raise SystemExit("preflight blocked collection: API budget exceeded")
-    service_key = os.environ.get(args.service_key_env, "")
-    if not service_key:
-        raise SystemExit(f"required secret is missing: {args.service_key_env}")
-    processed, skipped = collect_units(KRAClient(service_key), selected, args.output)
-    print(json.dumps({"processed": processed, "skipped": skipped}, ensure_ascii=False))
+
+    meets = _csv_ints(args.meets)
+    endpoints = _csv_strings(args.endpoints)
+    used_raw = json.loads(args.used_json)
+    if not isinstance(used_raw, dict):
+        raise SystemExit("used_json must be an object")
+    used = {str(k): int(v) for k, v in used_raw.items()}
+
+    phase1_units = build_monthly_units(args.start_year, args.end_year, meets, endpoints)
+    ledger = Ledger(args.output / "ledger.json")
+    completed = ledger.completed()
+    remaining = args.max_units
+    phase1_selected = _selected_pending(phase1_units, completed, remaining)
+    _enforce_budget(phase1_selected, used)
+
+    client: KRAClient | None = None
+
+    def get_client() -> KRAClient:
+        nonlocal client
+        if client is None:
+            service_key = os.environ.get(args.service_key_env, "")
+            if not service_key:
+                raise SystemExit(f"required secret is missing: {args.service_key_env}")
+            client = KRAClient(service_key)
+        return client
+
+    phase1_processed = phase1_skipped = 0
+    if phase1_selected:
+        phase1_processed, phase1_skipped = collect_units(
+            get_client(), phase1_selected, args.output
+        )
+    if remaining is not None:
+        remaining -= phase1_processed
+
+    phase2_processed = phase2_skipped = 0
+    result_dates: tuple[tuple[int, str], ...] = ()
+    results_deferred = False
+
+    if "results" in endpoints and (remaining is None or remaining > 0):
+        if not race_record_coverage_complete(
+            args.output, args.start_year, args.end_year, meets
+        ):
+            results_deferred = True
+        else:
+            result_dates = discover_result_dates(
+                args.output, args.start_year, args.end_year, meets
+            )
+            result_units = build_result_units(
+                args.start_year, args.end_year, meets, result_dates
+            )
+            completed = Ledger(args.output / "ledger.json").completed()
+            phase2_selected = _selected_pending(result_units, completed, remaining)
+            _enforce_budget(phase2_selected, used)
+            if phase2_selected:
+                phase2_processed, phase2_skipped = collect_units(
+                    get_client(), phase2_selected, args.output
+                )
+
+    report = {
+        "processed": phase1_processed + phase2_processed,
+        "skipped": phase1_skipped + phase2_skipped,
+        "phase1_processed": phase1_processed,
+        "phase2_processed": phase2_processed,
+        "result_dates_discovered": len(result_dates),
+        "results_deferred": results_deferred,
+    }
+    print(json.dumps(report, ensure_ascii=False))
     return 0
 
 
