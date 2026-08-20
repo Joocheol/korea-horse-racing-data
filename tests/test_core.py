@@ -101,6 +101,49 @@ class ParseTests(unittest.TestCase):
         self.assertNotIn(service_key, message)
         self.assertNotIn(encoded_key, message)
 
+    def test_session_exhaustion_result_is_retried(self) -> None:
+        session_error = (
+            b"<response><header><resultCode>99</resultCode>"
+            b"<resultMsg>\xea\xb0\x80\xec\x9a\xa9\xed\x95\x9c \xec\x84\xb8\xec\x85\x98\xec\x9d\xb4 \xec\xa1\xb4\xec\x9e\xac\xed\x95\x98\xec\xa7\x80 \xec\x95\x8a\xec\x8a\xb5\xeb\x8b\x88\xeb\x8b\xa4. (100/100)</resultMsg>"
+            b"</header><body><items/><totalCount>0</totalCount></body></response>"
+        )
+        bodies = iter([session_error, (FIXTURES / "page_one.xml").read_bytes()])
+        delays: list[float] = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def read(self):
+                return next(bodies)
+
+        client = KRAClient(
+            "secret-value",
+            max_attempts=2,
+            opener=lambda *args, **kwargs: Response(),
+            sleep=delays.append,
+        )
+        page = client.fetch_page(
+            RequestUnit("results", 1, "202512", race_date="20251207"),
+            1,
+            10,
+        )
+        self.assertEqual(page.total_count, 1)
+        self.assertEqual(len(delays), 1)
+
+    def test_unrelated_result_99_remains_permanent(self) -> None:
+        payload = {
+            "response": {
+                "header": {"resultCode": "99", "resultMsg": "invalid request"},
+                "body": {"items": "", "totalCount": 0},
+            }
+        }
+        with self.assertRaises(PermanentAPIError):
+            parse_page(payload, 1)
+
 
 class FormatAndPlanningTests(unittest.TestCase):
     def test_current_endpoint_formats_are_declared(self) -> None:
