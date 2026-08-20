@@ -1,12 +1,13 @@
 # 수집·검증 워크플로우
 
-*확정 2026-08-18*
+*확정 2026-08-21*
 
 이 문서는 KRA 공개 API 수집의 운영 규칙과 단계별 통과 기준을 정한다.
 API의 사실관계와 필드 정의는 [API_FINDINGS.md](API_FINDINGS.md), 2020·2021년
 범위는 [PILOT_2020_2021.md](PILOT_2020_2021.md), API별 형식·호출량·Dropbox 경로는
-[COLLECTION_FORMATS.md](COLLECTION_FORMATS.md)를 따른다. 문서가 충돌하면
-API_FINDINGS의 최신 변경 이력을 우선한다. 특히 개최일을 요일로 거르지 않는다.
+[COLLECTION_FORMATS.md](COLLECTION_FORMATS.md)를 따른다. `API227`의 실제 경주일 기반
+수집 규칙은 [API227_RACE_DAY_PLANNING.md](API227_RACE_DAY_PLANNING.md)가 과거
+`API_FINDINGS.md` 3절의 월 조회 해석보다 우선한다. 특히 개최일을 요일로 거르지 않는다.
 
 ## 1. 기본 원칙
 
@@ -57,6 +58,16 @@ preflight는 대상 범위, 예상 요청 수, 완료 단위와 재개 지점, A
 출력 경로, collector SHA, schema version, 필요한 Secret의 존재 여부를 출력한다.
 Secret 값은 출력하지 않는다.
 
+운영 preflight는 두 단계다.
+
+1. **월 단위 단계**: `API227`을 제외한 API를 계획하고 서비스별 호출 예산을 검사한다.
+2. **API227 단계**: 요청 범위의 `API4_3` meet-month가 모두 `complete`가 된 뒤 staged
+   `API4_3`에서 `unique(meet, rcDate)`를 만들고, 그 실제 요청 수에 대해 API227 예산을
+   다시 검사한다.
+
+일부 `API4_3` 월만 수집된 상태에서는 API227 날짜를 추정하지 않는다. 이 경우 API227
+단계는 `deferred`로 끝나며 다음 재개 실행에서 월 단위 수집을 먼저 완료한다.
+
 예상 신규 호출 수와 안전 여유분의 합이 당일 사용 가능량을 넘으면 실행을 차단하고
 범위를 분할한다. 완료된 요청은 캐시하여 다시 호출하지 않는다.
 
@@ -75,9 +86,14 @@ Dropbox 사용자 표시 경로는 `/앱/kra-data/`이며 기존 앱 폴더 아�
 
 ## 5. Ledger와 재개
 
-ledger의 기본 단위는 `경마장 × 월 × API × pool`이다. 다만 월 조회가 반복
-시간초과한 `API227`은 `경마장 × 날짜 × API`를 기본 단위로 사용한다. `rc_no`는
-생략해 해당 날짜의 모든 경주를 한 번에 받는다.
+ledger의 기본 단위는 `경마장 × 월 × API × pool`이다. `API227`만 공식 요청 계약에
+맞춰 `경마장 × 실제 경주일 × API`를 기본 단위로 사용하며 `rc_no`는 생략해 해당
+날짜의 모든 경주를 한 번에 받는다. 실제 경주일은 모든 요청 `API4_3` meet-month가
+완료된 뒤 staged `API4_3`의 `rcDate`에서 발견한다. 모든 달력 날짜를 API227 대상으로
+만들지 않는다.
+
+2020·2021 완전수집 파일럿의 과거 달력 전수 계획은 재현성을 위해 legacy planner에만
+남겨 둔다. 운영 CLI는 이 경로를 사용하지 않는다.
 
 각 항목에는 요청 파라미터와 페이지 범위, API `totalCount`, raw·고유 행 수,
 중복 수와 분류, 오류·재시도 횟수, raw 체크섬, collector SHA, schema version,
@@ -145,7 +161,7 @@ Actions 로그가 만료되어도 이 묶음만으로 실행과 판단을 재구
 
 ## 9. 종료 조건
 
-다음을 모두 만족할 때만 파일럿을 완료한다.
+다음을 모두 만족할 때만 본 수집을 완료한다.
 
 - 계획·구현·결과 검토에서 미해결 중대 지적 0건
 - 사전 정의한 기술·의미 검사가 모두 통과
