@@ -168,9 +168,22 @@ class KRAClient:
         self._sleep = sleep
         self._opener = opener
 
-    def fetch_page(self, unit: RequestUnit, page_no: int, num_rows: int) -> Page:
+    def fetch_page(
+        self,
+        unit: RequestUnit,
+        page_no: int,
+        num_rows: int,
+        *,
+        query_overrides: Mapping[str, str | int | None] | None = None,
+    ) -> Page:
         endpoint = ENDPOINTS[unit.endpoint]
         params = unit.params(page_no=page_no, num_rows=num_rows)
+        if query_overrides is not None:
+            for name, value in query_overrides.items():
+                if value is None:
+                    params.pop(name, None)
+                else:
+                    params[name] = value
         params["serviceKey"] = self._service_key
         url = f"{BASE_URL}/{endpoint.path}?{urlencode(params)}"
         accept = "application/json" if endpoint.response_format == "json" else "application/xml"
