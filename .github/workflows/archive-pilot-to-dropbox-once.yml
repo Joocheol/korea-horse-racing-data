@@ -33,13 +33,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download latest successful collection state
+      - name: Select latest successful collection state
+        id: select
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           python <<'PY'
-          import hashlib
           import json
           import os
           import pathlib
@@ -79,17 +79,13 @@ jobs:
           if selected is None:
               raise SystemExit("no unexpired kra-collection-state artifact from a successful run")
 
-          request = urllib.request.Request(selected["archive_download_url"], headers=headers)
-          with urllib.request.urlopen(request) as response:
-              payload = response.read()
           pathlib.Path("work").mkdir()
-          pathlib.Path("work/kra-collection-state.zip").write_bytes(payload)
           selection = {
               "artifact_id": selected["id"],
               "artifact_name": selected["name"],
               "artifact_created_at": selected["created_at"],
               "artifact_size_in_bytes": selected["size_in_bytes"],
-              "archive_sha256": hashlib.sha256(payload).hexdigest(),
+              "artifact_digest": selected.get("digest"),
               "workflow_run_id": selected_run["id"],
               "workflow_run_url": selected_run["html_url"],
               "workflow_run_conclusion": selected_run["conclusion"],
@@ -100,10 +96,18 @@ jobs:
               encoding="utf-8",
           )
           print(json.dumps(selection, ensure_ascii=False, indent=2))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"run_id={selected_run['id']}", file=output)
           PY
 
-          mkdir -p output
-          unzip -q work/kra-collection-state.zip -d output
+      - name: Restore selected collection state
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kra-collection-state
+          path: output
+          run-id: ${{ steps.select.outputs.run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
 
       - name: Recompute technical audit
         run: |
