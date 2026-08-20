@@ -11,11 +11,11 @@
 | `triple` | `API30_1` | JSON | 3,000 |
 | `sales` | `API179_1` | JSON | 3,000 |
 | `entries` | `API26_2` | JSON | 3,000 |
-| `results` | `API214_1` | JSON | 3,000 |
+| `results` | `API227` | XML | 3,000 |
 | `race_record` | `API4_3` | XML | 3,000 |
 | `quinella_crosscheck` | `API5` | JSON | 3,000 |
 
-JSON이 가능한 서비스는 JSON으로 받고 `API4_3`만 XML을 사용한다. raw 파일은
+JSON이 가능한 서비스는 JSON으로 받고 `API227`과 `API4_3`은 XML을 사용한다. raw 파일은
 응답 바이트를 변형하지 않고 페이지별 확장자 `.json` 또는 `.xml`로 저장한다.
 공통 JSONL 변환은 staged/normalized 계층에서만 수행한다.
 
