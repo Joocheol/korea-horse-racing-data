@@ -123,12 +123,32 @@ class FormatAndPlanningTests(unittest.TestCase):
         self.assertTrue(RequestUnit("results", 1, "202001").raw_page_relative_path(1).endswith(".xml"))
         self.assertTrue(RequestUnit("single", 1, "202001").raw_page_relative_path(1).endswith(".json"))
 
-    def test_pilot_has_eight_services_and_864_reserved_calls(self) -> None:
+    def test_pilot_has_daily_api227_units_and_2985_reserved_calls(self) -> None:
         units = build_units(2020, 2021, (1, 2, 3), tuple(ENDPOINTS))
-        self.assertEqual(len(units), 792)
+        self.assertEqual(len(units), 2_913)
         calls = estimate_calls(units)
         self.assertEqual(set(calls), {endpoint.service for endpoint in ENDPOINTS.values()})
-        self.assertEqual(sum(calls.values()), 864)
+        self.assertEqual(calls["API227"], 2_193)
+        self.assertEqual(sum(calls.values()), 2_985)
+
+        result_units = [unit for unit in units if unit.endpoint == "results"]
+        self.assertTrue(all(unit.race_date is not None for unit in result_units))
+        self.assertIn("20200229:m1:results:-", {unit.key for unit in result_units})
+
+    def test_api227_daily_unit_uses_date_and_unique_storage_path(self) -> None:
+        unit = RequestUnit("results", 1, "202512", race_date="20251207")
+        params = unit.params(page_no=1, num_rows=10)
+        self.assertEqual(params["rc_date"], "20251207")
+        self.assertNotIn("rc_month", params)
+        self.assertIn("date-20251207", unit.raw_page_relative_path(1))
+
+    def test_non_api227_unit_rejects_race_date(self) -> None:
+        with self.assertRaisesRegex(ValueError, "only for results"):
+            RequestUnit("single", 1, "202512", race_date="20251207")
+
+    def test_daily_unit_rejects_nonexistent_calendar_date(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not a calendar date"):
+            RequestUnit("results", 1, "202502", race_date="20250229")
 
     def test_every_service_uses_3000_daily_limit(self) -> None:
         units = [RequestUnit("single", 1, "202001")]
@@ -178,14 +198,10 @@ class ProbeTests(unittest.TestCase):
 
         client = KRAClient("decoded+secret/key==", max_attempts=1, opener=opener)
         page = client.fetch_page(
-            RequestUnit("results", 1, "202512"),
+            RequestUnit("results", 1, "202512", race_date="20251207"),
             1,
             10,
-            query_overrides={
-                "rc_month": None,
-                "rc_date": "20251207",
-                "rc_no": 1,
-            },
+            query_overrides={"rc_no": 1},
         )
 
         query = parse_qs(urlparse(captured_url).query)
@@ -209,11 +225,8 @@ class ProbeTests(unittest.TestCase):
             ])
 
         self.assertEqual(result, 0)
-        self.assertEqual(fetch.call_args.kwargs["query_overrides"], {
-            "rc_month": None,
-            "rc_date": "20251207",
-            "rc_no": 1,
-        })
+        self.assertEqual(fetch.call_args.args[0].race_date, "20251207")
+        self.assertEqual(fetch.call_args.kwargs["query_overrides"], {"rc_no": 1})
         report = json.loads(output.getvalue())
         self.assertEqual(report["request"]["race_date"], "20251207")
         self.assertEqual(report["request"]["race_no"], 1)

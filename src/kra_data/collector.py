@@ -53,6 +53,7 @@ def collect_one(
             "format": endpoint.response_format,
             "meet": unit.meet,
             "month": unit.month,
+            "race_date": unit.race_date,
             "pool": unit.pool,
         },
         collector_sha=collector_sha,
