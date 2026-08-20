@@ -19,7 +19,7 @@
 | 삼복승·삼쌍승 | `API30_1` | `triplePredictionRateInfo_1` | 검증 |
 | 승식별 매출액 + 당첨배당 | `API179_1` | `salesAndDividendRate_1` | 검증 |
 | 출전표 (등록두수 `dusu`) | `API26_2` | `entrySheet_2` | 검증 |
-| 경주결과 상세 (착순·날씨·주로) | `API227` | `racedetailresult` | 검증 |
+| 경주결과 상세 (착순·날씨·주로) | `API227` | `getracedetailresult` | 검증 |
 | 경주기록 | `API4_3` | `raceResult_3` | 검증 |
 | 복승 (중복 출처, 교차검증용) | `API5` | `quinellaOddsInfo` | 검증 |
 | 확정배당율 통합 | `API301` | `Dividend_rate_total` | 경로 미확인 |
@@ -367,8 +367,10 @@ API를 **전 기간 월 단위로 대조**했다(복승식 셀 수 기준).
 
 ## 변경 이력
 
+- **2026-08-20 (6차)** — API227 서비스 URL과 실제 요청주소를 구분하여 호출 경로를
+  `/racedetailresult/getracedetailresult`로 확정.
 - **2026-08-20 (5차)** — 경주별상세성적표의 현재 참고문서에 맞춰 구버전 경로를
-  `API227/racedetailresult` XML로 교체.
+  `API227` XML 서비스로 교체.
 - **2026-08-20 (4차)** — 대상 8개 서비스를 확정하고 JSON 우선·`API4_3` XML,
   서비스별 일일 3,000회 한도, raw 원응답 바이트 보존 원칙을 반영.
 - **2026-08-18 (3차)** — 2016년 의심 날짜 7건을 매출액·착순으로 실측해
