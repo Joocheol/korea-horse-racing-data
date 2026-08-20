@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     pool = args.pool
     if pool is None and None not in endpoint.pools:
         pool = endpoint.pools[0]
-    unit = RequestUnit(args.endpoint, args.meet, args.month, pool)
+    unit = RequestUnit(args.endpoint, args.meet, args.month, pool, args.race_date)
 
     service_key = os.environ.get(args.service_key_env, "")
     if not service_key:
@@ -70,11 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     query_overrides: dict[str, str | int | None] | None = None
     if args.race_date is not None:
-        query_overrides = {
-            "rc_month": None,
-            "rc_date": args.race_date,
-            "rc_no": args.race_no,
-        }
+        query_overrides = {"rc_no": args.race_no}
     try:
         page = KRAClient(
             service_key,
