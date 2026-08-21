@@ -68,7 +68,7 @@ jobs:
     needs: monthly-budget
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
     runs-on: ubuntu-latest
@@ -122,8 +122,6 @@ jobs:
               ]
 
           selected = None
-          # A prior backfill artifact contains phase 1 plus any API227 progress,
-          # so prefer it over a phase-1-only artifact.
           for name in (f"kra-backfill-{year}", f"kra-phase1-{year}"):
               candidates = artifacts(name)
               if candidates:
@@ -272,8 +270,6 @@ jobs:
               per_year[str(year)] = len(units)
               all_units.extend(units)
 
-          # Keep 200 API227 calls unused for manual probes/unexpected retries in addition
-          # to the standard 10% safety margin.
           budgets = check_budget(all_units, used={"API227": 200}, safety_rate=0.10)
           report = {
               "years": list(years),
@@ -311,7 +307,7 @@ jobs:
     needs: api227-budget
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
     runs-on: ubuntu-latest
