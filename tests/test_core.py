@@ -153,6 +153,8 @@ class FormatAndPlanningTests(unittest.TestCase):
             "racedetailresult/getracedetailresult",
         )
         self.assertEqual(ENDPOINTS["results"].response_format, "xml")
+        self.assertEqual(ENDPOINTS["results"].num_rows, 3_000)
+        self.assertEqual(ENDPOINTS["triple"].num_rows, 100_000)
         self.assertEqual(ENDPOINTS["race_record"].service, "API4_3")
         self.assertEqual(ENDPOINTS["race_record"].response_format, "xml")
         self.assertTrue(all(
@@ -370,6 +372,47 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertEqual(record["state"], "failed")
             self.assertEqual(record["partial_page_count"], 1)
             self.assertTrue((output / record["partial_raw_paths"][0]["path"]).is_file())
+
+    def test_transient_unit_failure_does_not_block_later_units_when_enabled(self) -> None:
+        class IntermittentClient:
+            def __init__(self):
+                self.num_rows: list[int] = []
+
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                self.num_rows.append(num_rows)
+                if unit.race_date == "20200104":
+                    raise TransientAPIError("timed out")
+                page = Page(
+                    page_no=1,
+                    total_count=0,
+                    rows=[],
+                    raw_body=b"<response />",
+                    response_format="xml",
+                )
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            client = IntermittentClient()
+            self.assertEqual(
+                collect_units(
+                    client,
+                    units,
+                    output,
+                    continue_on_transient_error=True,
+                ),
+                (1, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            self.assertEqual(ledger.state(units[0].key), "failed")
+            self.assertEqual(ledger.state(units[1].key), "complete")
+            self.assertEqual(client.num_rows, [3_000, 3_000])
 
 
 if __name__ == "__main__":

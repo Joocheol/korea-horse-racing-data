@@ -14,10 +14,13 @@ class Endpoint:
     pools: tuple[str | None, ...]
     response_format: str = "json"
     daily_limit: int = 3_000
+    num_rows: int = 100_000
 
     def __post_init__(self) -> None:
         if self.response_format not in {"json", "xml"}:
             raise ValueError(f"unsupported response format: {self.response_format}")
+        if self.num_rows < 1:
+            raise ValueError("num_rows must be positive")
 
 
 ENDPOINTS: dict[str, Endpoint] = {
@@ -37,7 +40,12 @@ ENDPOINTS: dict[str, Endpoint] = {
         "entries", "API26_2", "API26_2/entrySheet_2", (None,)
     ),
     "results": Endpoint(
-        "results", "API227", "racedetailresult/getracedetailresult", (None,), response_format="xml"
+        "results",
+        "API227",
+        "racedetailresult/getracedetailresult",
+        (None,),
+        response_format="xml",
+        num_rows=3_000,
     ),
     "race_record": Endpoint(
         "race_record", "API4_3", "API4_3/raceResult_3", (None,), response_format="xml"

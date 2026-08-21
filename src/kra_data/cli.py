@@ -28,6 +28,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-units", type=int)
     result.add_argument("--used-json", default="{}")
     result.add_argument("--service-key-env", default="DATA_GO_KR_SERVICE_KEY")
+    result.add_argument("--request-timeout", type=float, default=60.0)
+    result.add_argument("--request-attempts", type=int, default=5)
+    result.add_argument("--continue-on-transient-error", action="store_true")
     return result
 
 
@@ -66,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.max_units is not None and args.max_units < 1:
         raise SystemExit("max_units must be positive")
+    if args.request_timeout <= 0:
+        raise SystemExit("request_timeout must be positive")
+    if args.request_attempts < 1:
+        raise SystemExit("request_attempts must be positive")
 
     meets = _csv_ints(args.meets)
     endpoints = _csv_strings(args.endpoints)
@@ -89,7 +96,11 @@ def main(argv: list[str] | None = None) -> int:
             service_key = os.environ.get(args.service_key_env, "")
             if not service_key:
                 raise SystemExit(f"required secret is missing: {args.service_key_env}")
-            client = KRAClient(service_key)
+            client = KRAClient(
+                service_key,
+                timeout=args.request_timeout,
+                max_attempts=args.request_attempts,
+            )
         return client
 
     phase1_processed = phase1_skipped = 0
@@ -124,8 +135,22 @@ def main(argv: list[str] | None = None) -> int:
             phase2_budgets = _enforce_budget(phase2_selected, used)
             if phase2_selected:
                 phase2_processed, phase2_skipped = collect_units(
-                    get_client(), phase2_selected, args.output
+                    get_client(),
+                    phase2_selected,
+                    args.output,
+                    continue_on_transient_error=args.continue_on_transient_error,
                 )
+
+    phase2_failed_units: list[str] = []
+    if "results" in endpoints and result_dates:
+        final_ledger = Ledger(args.output / "ledger.json")
+        phase2_failed_units = [
+            unit.key
+            for unit in build_result_units(
+                args.start_year, args.end_year, meets, result_dates
+            )
+            if final_ledger.state(unit.key) == "failed"
+        ]
 
     report = {
         "processed": phase1_processed + phase2_processed,
@@ -135,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         "phase1_budget": _budget_report(phase1_budgets),
         "phase2_budget": _budget_report(phase2_budgets),
         "phase2_selected_units": phase2_selected_count,
+        "phase2_failed": len(phase2_failed_units),
+        "phase2_failed_units": phase2_failed_units,
         "result_dates_discovered": len(result_dates),
         "results_deferred": results_deferred,
     }

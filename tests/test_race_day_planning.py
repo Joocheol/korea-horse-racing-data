@@ -12,6 +12,7 @@ from unittest.mock import patch
 from kra_data.cli import main as collect_main
 from kra_data.client import Page
 from kra_data.config import ENDPOINTS
+from kra_data.errors import TransientAPIError
 from kra_data.ledger import Ledger
 from kra_data.planning import (
     build_monthly_units,
@@ -76,7 +77,7 @@ class RaceDayPlanningTests(unittest.TestCase):
         class FakeClient:
             calls: list[str] = []
 
-            def __init__(self, service_key: str):
+            def __init__(self, service_key: str, **kwargs):
                 self.service_key = service_key
 
             def collect_unit(self, unit, num_rows=100_000, on_page=None):
@@ -137,6 +138,57 @@ class RaceDayPlanningTests(unittest.TestCase):
             self.assertTrue(api227_budget["allowed"])
             result_calls = [key for key in FakeClient.calls if ":results:" in key]
             self.assertEqual(result_calls, ["20200104:m1:results:-"])
+
+    def test_cli_reports_transient_api227_failure_after_continuing(self) -> None:
+        class FailingResultClient:
+            def __init__(self, service_key: str, **kwargs):
+                self.service_key = service_key
+
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                if unit.endpoint == "results":
+                    raise TransientAPIError("timed out")
+                rows = (
+                    [{"rcDate": "20200104", "rcNo": "1", "chulNo": "1"}]
+                    if unit.endpoint == "race_record" and unit.month == "202001"
+                    else []
+                )
+                page = Page(
+                    page_no=1,
+                    total_count=len(rows),
+                    rows=rows,
+                    raw_body=b"<response />",
+                    response_format="xml",
+                )
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {"RACE_DAY_TEST_KEY": "secret-value"}),
+                patch("kra_data.cli.KRAClient", FailingResultClient),
+                redirect_stdout(stdout),
+            ):
+                status = collect_main([
+                    "--start-year", "2020",
+                    "--end-year", "2020",
+                    "--meets", "1",
+                    "--endpoints", "race_record,results",
+                    "--output", directory,
+                    "--service-key-env", "RACE_DAY_TEST_KEY",
+                    "--request-attempts", "1",
+                    "--continue-on-transient-error",
+                ])
+
+            self.assertEqual(status, 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["phase2_processed"], 0)
+            self.assertEqual(report["phase2_failed"], 1)
+            self.assertEqual(
+                report["phase2_failed_units"],
+                ["20200104:m1:results:-"],
+            )
 
 
 if __name__ == "__main__":

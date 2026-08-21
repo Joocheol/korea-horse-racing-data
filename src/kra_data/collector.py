@@ -8,6 +8,7 @@ from typing import Iterable
 
 from .client import KRAClient, Page
 from .config import ENDPOINTS, SCHEMA_VERSION
+from .errors import TransientAPIError
 from .ledger import Ledger
 from .models import RequestUnit
 from .storage import atomic_write_bytes, canonical_json, write_immutable_bytes
@@ -41,9 +42,10 @@ def collect_one(
     ledger: Ledger,
     *,
     collector_sha: str,
-    num_rows: int = 100_000,
+    num_rows: int | None = None,
 ) -> ValidationSummary:
     endpoint = ENDPOINTS[unit.endpoint]
+    num_rows = endpoint.num_rows if num_rows is None else num_rows
     ledger.update(
         unit.key,
         "running",
@@ -103,18 +105,25 @@ def collect_units(
     *,
     max_units: int | None = None,
     collector_sha: str | None = None,
+    continue_on_transient_error: bool = False,
 ) -> tuple[int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(output_dir / "ledger.json")
     completed = ledger.completed()
     collector_sha = collector_sha or os.environ.get("GITHUB_SHA", "local")
-    processed = skipped = 0
+    processed = skipped = attempted = 0
     for unit in units:
         if unit.key in completed:
             skipped += 1
             continue
-        if max_units is not None and processed >= max_units:
+        if max_units is not None and attempted >= max_units:
             break
-        collect_one(client, unit, output_dir, ledger, collector_sha=collector_sha)
-        processed += 1
+        attempted += 1
+        try:
+            collect_one(client, unit, output_dir, ledger, collector_sha=collector_sha)
+        except TransientAPIError:
+            if not continue_on_transient_error:
+                raise
+        else:
+            processed += 1
     return processed, skipped
