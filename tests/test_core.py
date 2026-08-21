@@ -355,6 +355,36 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("checksum mismatch", report["errors"][0])
 
+    def test_scoped_audit_ignores_failure_from_another_phase(self) -> None:
+        class FakeClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                page = json_page(1, 1, [{"id": unit.key}])
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            monthly = RequestUnit("single", 1, "202001")
+            failed_result = RequestUnit(
+                "results", 1, "202001", race_date="20200104"
+            )
+            collect_units(FakeClient(), [monthly], output)
+            Ledger(output / "ledger.json").update(
+                failed_result.key,
+                "failed",
+                request={"endpoint": "results"},
+                error="timed out",
+            )
+
+            full_report = audit_output(output)
+            scoped_report = audit_output(output, endpoints={"single"})
+            self.assertFalse(full_report["passed"])
+            self.assertTrue(scoped_report["passed"])
+            self.assertEqual(scoped_report["ledger_units"], 1)
+            self.assertEqual(scoped_report["total_ledger_units"], 2)
+            self.assertEqual(scoped_report["endpoint_filter"], ["single"])
+
     def test_partial_page_raw_bytes_are_preserved_after_failure(self) -> None:
         class FailingClient:
             def collect_unit(self, unit, num_rows=100_000, on_page=None):

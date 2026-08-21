@@ -221,7 +221,9 @@ jobs:
               print(json.dumps(report, ensure_ascii=False, indent=2))
           print(f"Monthly ledger complete: {len(expected)}/{len(expected)} units for {year}")
           PY
-          python -m kra_data.audit --output output
+          python -m kra_data.audit \
+            --output output \
+            --endpoints single,double,triple,sales,entries,race_record,quinella_crosscheck
 
       - name: Preserve phase-one state even after failure
         if: ${{ always() }}
