@@ -444,6 +444,72 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertEqual(ledger.state(units[1].key), "complete")
             self.assertEqual(client.num_rows, [3_000, 3_000])
 
+    def test_validation_failure_does_not_block_later_units_when_enabled(self) -> None:
+        class ValidationFailingClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                if unit.race_date == "20200104":
+                    raise ValidationError("duplicate rows")
+                page = Page(1, 0, [], b"<response />", "xml")
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            self.assertEqual(
+                collect_units(
+                    ValidationFailingClient(),
+                    units,
+                    output,
+                    continue_on_unit_error=True,
+                ),
+                (1, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            self.assertEqual(ledger.state(units[0].key), "failed")
+            self.assertEqual(ledger.state(units[1].key), "complete")
+
+    def test_raw_conflict_is_preserved_and_does_not_block_later_units(self) -> None:
+        class ChangedResponseClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                page = Page(1, 0, [], b"<new-response />", "xml")
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            conflict = output / "raw" / units[0].raw_page_relative_path(1)
+            conflict.parent.mkdir(parents=True, exist_ok=True)
+            conflict.write_bytes(b"<old-response />")
+
+            self.assertEqual(
+                collect_units(
+                    ChangedResponseClient(),
+                    units,
+                    output,
+                    continue_on_unit_error=True,
+                ),
+                (1, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            failed = ledger.data["units"][units[0].key]
+            self.assertEqual(failed["state"], "failed")
+            self.assertEqual(failed["error_type"], "FileExistsError")
+            self.assertEqual(conflict.read_bytes(), b"<old-response />")
+            self.assertTrue(
+                (output / failed["partial_raw_paths"][0]["path"]).is_file()
+            )
+            self.assertEqual(ledger.state(units[1].key), "complete")
+
 
 if __name__ == "__main__":
     unittest.main()

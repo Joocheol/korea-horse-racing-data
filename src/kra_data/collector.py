@@ -8,7 +8,7 @@ from typing import Iterable
 
 from .client import KRAClient, Page
 from .config import ENDPOINTS, SCHEMA_VERSION
-from .errors import TransientAPIError
+from .errors import TransientAPIError, ValidationError
 from .ledger import Ledger
 from .models import RequestUnit
 from .storage import atomic_write_bytes, canonical_json, write_immutable_bytes
@@ -106,6 +106,7 @@ def collect_units(
     max_units: int | None = None,
     collector_sha: str | None = None,
     continue_on_transient_error: bool = False,
+    continue_on_unit_error: bool = False,
 ) -> tuple[int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(output_dir / "ledger.json")
@@ -122,7 +123,10 @@ def collect_units(
         try:
             collect_one(client, unit, output_dir, ledger, collector_sha=collector_sha)
         except TransientAPIError:
-            if not continue_on_transient_error:
+            if not (continue_on_transient_error or continue_on_unit_error):
+                raise
+        except (ValidationError, FileExistsError):
+            if not continue_on_unit_error:
                 raise
         else:
             processed += 1

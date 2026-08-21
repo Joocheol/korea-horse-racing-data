@@ -400,7 +400,7 @@ jobs:
             --used-json '{}' \
             --request-timeout 30 \
             --request-attempts 1 \
-            --continue-on-transient-error \
+            --continue-on-unit-error \
             --output output \
             > "phase2-${YEAR}.json"
 

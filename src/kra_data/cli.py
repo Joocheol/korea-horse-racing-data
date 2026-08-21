@@ -31,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--request-timeout", type=float, default=60.0)
     result.add_argument("--request-attempts", type=int, default=5)
     result.add_argument("--continue-on-transient-error", action="store_true")
+    result.add_argument("--continue-on-unit-error", action="store_true")
     return result
 
 
@@ -139,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
                     phase2_selected,
                     args.output,
                     continue_on_transient_error=args.continue_on_transient_error,
+                    continue_on_unit_error=args.continue_on_unit_error,
                 )
 
     phase2_failed_units: list[str] = []
