@@ -7,6 +7,7 @@ on:
 permissions:
   actions: write
   contents: read
+  issues: write
 
 jobs:
   dispatch:
@@ -16,4 +17,39 @@ jobs:
       - name: Dispatch research dataset workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-research-dataset-once.yml --repo ${{ github.repository }} --ref main
+        run: |
+          before=$(gh run list --repo "${{ github.repository }}" --workflow build-research-dataset-once.yml --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run build-research-dataset-once.yml --repo "${{ github.repository }}" --ref main
+          for i in $(seq 1 30); do
+            sleep 2
+            run_id=$(gh run list --repo "${{ github.repository }}" --workflow build-research-dataset-once.yml --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+            if [ "$run_id" != "0" ] && [ "$run_id" != "$before" ]; then
+              echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+              echo "Dispatched run $run_id"
+              exit 0
+            fi
+          done
+          echo "Could not observe dispatched run" >&2
+          exit 1
+
+      - name: Wait for research dataset run
+        if: env.RUN_ID != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run watch "$RUN_ID" --repo "${{ github.repository }}" --exit-status
+
+      - name: Report result to trigger issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${RUN_ID:-}" ]; then
+            json=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json status,conclusion,url)
+            status=$(printf '%s' "$json" | jq -r '.status')
+            conclusion=$(printf '%s' "$json" | jq -r '.conclusion // ""')
+            url=$(printf '%s' "$json" | jq -r '.url')
+            gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "Research dataset run: $RUN_ID\nStatus: $status\nConclusion: $conclusion\n$url"
+          else
+            gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "Research dataset dispatch failed before a run ID was observed."
+          fi
