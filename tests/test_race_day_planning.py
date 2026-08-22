@@ -17,7 +17,6 @@ from kra_data.ledger import Ledger
 from kra_data.planning import (
     build_monthly_units,
     build_result_units,
-    build_units,
     discover_result_dates,
     race_record_coverage_complete,
 )
@@ -37,7 +36,7 @@ class RaceDayPlanningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             ledger = Ledger(output / "ledger.json")
-            expected = build_units(2020, 2020, (1,), ("race_record",))
+            expected = build_monthly_units(2020, 2020, (1,), ("race_record",))
             for unit in expected:
                 staged = output / "staged" / unit.staged_relative_path
                 staged.parent.mkdir(parents=True, exist_ok=True)
