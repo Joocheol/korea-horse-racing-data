@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 kra-collect = "kra_data.cli:main"
 kra-preflight = "kra_data.preflight:main"
 kra-audit = "kra_data.audit:main"
+kra-research = "kra_data.research:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
