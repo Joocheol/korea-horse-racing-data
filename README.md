@@ -4,33 +4,40 @@
 
 ## 현재 상태
 
-2016-2025년 10개년 수집물은 ledger 기준 기술 감사와 보존 감사가 완료된 상태입니다.
-2020·2021년은 기존 수집 완료 artifact를 사용했으며 재수집하지 않습니다.
+**2016-2025년 10개년 KRA 공개 API 수집·보존 작업은 완료 상태입니다.**
 
-현재 판정과 남은 의미 검증 항목은
+- 총 8,123개 논리 수집 단위 기술 감사 완료, 오류 0
+- 2020·2021은 기존 수집 완료 artifact를 재사용했으며 재수집하지 않음
+- 2020·2021 경주 universe 의미 감사 완료
+- raw / normalized / manifests / quarantine / docs 계층 Dropbox 보존 감사 완료
+- 원천 API가 제공하지 않는 값은 source-level coverage gap으로 별도 표시
+
+최종 판정과 검증 근거는
 **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)**에 기록합니다.
+2020·2021의 승식별 coverage 차이 검증은
+**[docs/SEMANTIC_AUDIT_2020_2021.md](docs/SEMANTIC_AUDIT_2020_2021.md)**를 참고하십시오.
 
-## 파일럿 범위
+## 수집 범위
 
-2020·2021년, 서울·제주·부경의 다음 8개 공개 API를 수집합니다.
+2016-2025년, 서울·제주·부경의 다음 8개 공개 API를 보존합니다.
 
 `API28_1`, `API29_1`, `API30_1`, `API179_1`, `API26_2`, `API227`, `API4_3`, `API5`
 
 - 원본 형식은 JSON 우선이며, `API227`과 `API4_3`은 XML로 보존합니다.
 - raw 응답은 파싱 후 재조립하지 않고 페이지별 원본 바이트를 그대로 저장합니다.
-- 서비스별 개발계정 한도 3,000회를 각각 검사합니다.
-- 월 조회가 느린 `API227`만 경주일 단위로 받고, 나머지는 월 단위로 받습니다.
-- 파일럿 전체는 2,913개 수집 단위이며, 추가 페이지 예산을 포함해 2,985회
-  호출로 계획합니다. `API227` 자체 호출은 2,193회로 서비스별 한도 안입니다.
+- 월 조회가 느린 `API227`은 `API4_3`에서 실제 경주일을 발견한 뒤 경주일 단위로 수집합니다.
 - Dropbox 사용자 표시 경로는 `/앱/kra-data/`이고, 그 아래 `raw`, `normalized`,
   `manifests`, `quarantine`, `docs`를 둡니다.
+- 비경주/예비·취소·시험성 기록은 raw에는 보존하되 연구용 race universe에서는 제외합니다.
+- 원천 API의 coverage gap은 값을 임의로 0으로 채우지 않고 결측 flag로 관리합니다.
 
 ## 문서
 
 - **[docs/API_FINDINGS.md](docs/API_FINDINGS.md)** — KRA 공개 API 조사 결과
-- **[docs/PILOT_2020_2021.md](docs/PILOT_2020_2021.md)** — 첫 수집 범위와 검증 방침
+- **[docs/PILOT_2020_2021.md](docs/PILOT_2020_2021.md)** — 2020·2021 최초 수집 범위와 검증 방침
 - **[docs/COLLECTION_WORKFLOW.md](docs/COLLECTION_WORKFLOW.md)** — 실행 승인, 재개, 저장 계층과 종료 기준
-- **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 10개년 보존·검증 현황
+- **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 10개년 최종 보존·검증 현황
+- **[docs/SEMANTIC_AUDIT_2020_2021.md](docs/SEMANTIC_AUDIT_2020_2021.md)** — 2020·2021 경주 ID·승식 coverage 의미 감사
 
 ## 개발·검증
 
@@ -40,9 +47,5 @@ PYTHONPATH=src python -m kra_data.preflight \
   --start-year 2020 --end-year 2021 --meets 1,2,3
 ```
 
-실제 수집은 push로 시작되지 않습니다. `Collect KRA pilot batch`를 수동 실행하고
-`kra-collection` Environment 승인을 받아야 합니다.
-
+실제 수집은 push로 시작되지 않습니다. 수동 workflow와 Environment 승인을 사용합니다.
 연결 상태와 페이지 크기를 점검할 때는 `Probe one KRA API page`를 실행합니다.
-이 진단 워크플로우는 전체 월을 수집하지 않고 지정한 페이지 한 장만 요청하며,
-인증키를 출력하지 않은 채 행 수·전체 건수·응답 크기·SHA-256을 기록합니다.
