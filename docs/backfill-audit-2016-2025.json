@@ -1,7 +1,7 @@
 {
   "archive_workflow": {
-    "run_id": 32549674197,
-    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32549674197"
+    "run_id": 32550935064,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32550935064"
   },
   "scope": {
     "years": [
@@ -185,79 +185,79 @@
     },
     {
       "name": "kra-docs-2016-2025.tar.gz",
-      "size": 17366
+      "size": 18819
     },
     {
       "name": "kra-manifests-2016.tar.gz",
-      "size": 52233
+      "size": 52223
     },
     {
       "name": "kra-manifests-2017.tar.gz",
-      "size": 52726
+      "size": 52727
     },
     {
       "name": "kra-manifests-2018.tar.gz",
-      "size": 52765
+      "size": 52754
     },
     {
       "name": "kra-manifests-2019.tar.gz",
-      "size": 52418
+      "size": 52414
     },
     {
       "name": "kra-manifests-2022.tar.gz",
-      "size": 52588
+      "size": 52592
     },
     {
       "name": "kra-manifests-2023.tar.gz",
-      "size": 52999
+      "size": 53000
     },
     {
       "name": "kra-manifests-2024.tar.gz",
-      "size": 52872
+      "size": 52879
     },
     {
       "name": "kra-manifests-2025.tar.gz",
-      "size": 53175
+      "size": 53189
     },
     {
       "name": "kra-normalized-2016.tar.gz",
-      "size": 23731048
+      "size": 23726758
     },
     {
       "name": "kra-normalized-2017.tar.gz",
-      "size": 29835079
+      "size": 29834492
     },
     {
       "name": "kra-normalized-2018.tar.gz",
-      "size": 29773589
+      "size": 29773105
     },
     {
       "name": "kra-normalized-2019.tar.gz",
-      "size": 30698254
+      "size": 30697965
     },
     {
       "name": "kra-normalized-2022.tar.gz",
-      "size": 27133396
+      "size": 27133499
     },
     {
       "name": "kra-normalized-2023.tar.gz",
-      "size": 27483807
+      "size": 27482967
     },
     {
       "name": "kra-normalized-2024.tar.gz",
-      "size": 26503109
+      "size": 26504225
     },
     {
       "name": "kra-normalized-2025.tar.gz",
-      "size": 27336415
+      "size": 27334652
     },
     {
       "name": "kra-quarantine-2016.tar.gz",
-      "size": 246
+      "size": 247
     },
     {
       "name": "kra-quarantine-2017.tar.gz",
-      "size": 248
+      "size": 247
     },
     {
       "name": "kra-quarantine-2018.tar.gz",
@@ -265,55 +265,55 @@
     },
     {
       "name": "kra-quarantine-2019.tar.gz",
-      "size": 244
+      "size": 247
     },
     {
       "name": "kra-quarantine-2022.tar.gz",
-      "size": 348653
+      "size": 348420
     },
     {
       "name": "kra-quarantine-2023.tar.gz",
-      "size": 11177
+      "size": 11115
     },
     {
       "name": "kra-quarantine-2024.tar.gz",
-      "size": 6016
+      "size": 5973
     },
     {
       "name": "kra-quarantine-2025.tar.gz",
-      "size": 433531
+      "size": 433424
     },
     {
       "name": "kra-raw-2016.tar.gz",
-      "size": 24450210
+      "size": 24449372
     },
     {
       "name": "kra-raw-2017.tar.gz",
-      "size": 30552874
+      "size": 30554477
     },
     {
       "name": "kra-raw-2018.tar.gz",
-      "size": 30487536
+      "size": 30486560
     },
     {
       "name": "kra-raw-2019.tar.gz",
-      "size": 31423600
+      "size": 31421039
     },
     {
       "name": "kra-raw-2022.tar.gz",
-      "size": 27782949
+      "size": 27784298
     },
     {
       "name": "kra-raw-2023.tar.gz",
-      "size": 28168475
+      "size": 28165601
     },
     {
       "name": "kra-raw-2024.tar.gz",
-      "size": 27180698
+      "size": 27179038
     },
     {
       "name": "kra-raw-2025.tar.gz",
-      "size": 28009565
+      "size": 28009667
     },
     {
       "name": "source-artifacts-2016-2025.json",
@@ -358,11 +358,6 @@
   ],
   "dropbox_step_outcome": "failure",
   "dropbox": {
-    "status": "missing_secrets",
-    "missing": [
-      "DROPBOX_APP_KEY",
-      "DROPBOX_APP_SECRET",
-      "DROPBOX_REFRESH_TOKEN"
-    ]
+    "status": "not_run"
   }
 }
