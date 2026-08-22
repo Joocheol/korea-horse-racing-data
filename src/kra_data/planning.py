@@ -19,7 +19,16 @@ def iter_months(start_year: int, end_year: int) -> Iterator[str]:
             yield f"{year:04d}{month:02d}"
 
 
+def _validate_endpoints(endpoints: Iterable[str]) -> tuple[str, ...]:
+    endpoint_names = tuple(endpoints)
+    unknown = [name for name in endpoint_names if name not in ENDPOINTS]
+    if unknown:
+        raise ValueError(f"unknown endpoint: {unknown[0]}")
+    return endpoint_names
+
+
 def iter_dates(month: str) -> Iterator[str]:
+    """Legacy calendar expansion retained only for pilot reproducibility tests."""
     if len(month) != 6 or not month.isdigit():
         raise ValueError(f"month must be YYYYMM: {month}")
     year = int(month[:4])
@@ -34,18 +43,15 @@ def build_units(
     meets: Iterable[int],
     endpoints: Iterable[str],
 ) -> list[RequestUnit]:
-    """Build the legacy conservative plan.
+    """Reproduce the completed 2020-2021 all-calendar-date pilot plan.
 
-    This function deliberately keeps the original all-calendar-date API227
-    expansion for reproducibility of the completed 2020-2021 pilot. Production
-    collection should use ``build_monthly_units`` followed by
-    ``discover_result_dates`` and ``build_result_units``.
+    Production code must use ``build_monthly_units`` followed by
+    ``discover_result_dates`` and ``build_result_units``. This legacy function
+    remains only so the completed pilot's historical request count can be
+    reproduced from tests and Git history.
     """
+    endpoint_names = _validate_endpoints(endpoints)
     units: list[RequestUnit] = []
-    endpoint_names = tuple(endpoints)
-    for name in endpoint_names:
-        if name not in ENDPOINTS:
-            raise ValueError(f"unknown endpoint: {name}")
     for month in iter_months(start_year, end_year):
         for meet in meets:
             for name in endpoint_names:
@@ -66,17 +72,19 @@ def build_monthly_units(
     meets: Iterable[int],
     endpoints: Iterable[str],
 ) -> list[RequestUnit]:
-    """Build phase-1 units, excluding date-only API227 requests."""
-    endpoint_names = tuple(endpoints)
-    for name in endpoint_names:
-        if name not in ENDPOINTS:
-            raise ValueError(f"unknown endpoint: {name}")
-    return build_units(
-        start_year,
-        end_year,
-        tuple(meets),
-        tuple(name for name in endpoint_names if name != "results"),
+    """Build production phase-1 units, excluding date-only API227 requests."""
+    endpoint_names = tuple(
+        name for name in _validate_endpoints(endpoints) if name != "results"
     )
+    units: list[RequestUnit] = []
+    for month in iter_months(start_year, end_year):
+        for meet in meets:
+            for name in endpoint_names:
+                units.extend(
+                    RequestUnit(name, meet, month, pool)
+                    for pool in ENDPOINTS[name].pools
+                )
+    return units
 
 
 def _normalize_race_date(value: object) -> str:
@@ -95,7 +103,7 @@ def _expected_race_record_units(
     end_year: int,
     meets: Iterable[int],
 ) -> list[RequestUnit]:
-    return build_units(start_year, end_year, tuple(meets), ("race_record",))
+    return build_monthly_units(start_year, end_year, tuple(meets), ("race_record",))
 
 
 def race_record_coverage_complete(
@@ -167,7 +175,6 @@ def build_result_units(
 ) -> list[RequestUnit]:
     """Build API227 units only for discovered actual meet-date pairs."""
     meet_values = set(meets)
-    units: list[RequestUnit] = []
     normalized: set[tuple[int, str]] = set()
     for meet, raw_date in result_dates:
         race_date = _normalize_race_date(raw_date)
@@ -176,7 +183,10 @@ def build_result_units(
             continue
         normalized.add((int(meet), race_date))
 
+    units: list[RequestUnit] = []
     for meet, race_date in sorted(normalized, key=lambda item: (item[1], item[0])):
-        for pool in ENDPOINTS["results"].pools:
-            units.append(RequestUnit("results", meet, race_date[:6], pool, race_date))
+        units.extend(
+            RequestUnit("results", meet, race_date[:6], pool, race_date)
+            for pool in ENDPOINTS["results"].pools
+        )
     return units
