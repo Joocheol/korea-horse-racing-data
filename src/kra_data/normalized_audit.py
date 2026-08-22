@@ -49,7 +49,7 @@ def _iter_dir(path: Path) -> Iterable[tuple[str, bytes]]:
     for root in roots:
         if not root.exists():
             continue
-        for file in root.rglob("*.jsonl"):
+        for file in sorted(root.rglob("*.jsonl")):
             resolved = file.resolve()
             if resolved in seen:
                 continue
@@ -67,6 +67,16 @@ def _qnl_key(row: dict[str, object]) -> tuple[str, str, int, int, int]:
     )
 
 
+def _entry_key(row: dict[str, object]) -> tuple[str, str, int, int, str]:
+    return (
+        str(row["rcDate"]),
+        str(row["meet"]),
+        int(row["rcNo"]),
+        int(row["chulNo"]),
+        str(row["hrNo"]),
+    )
+
+
 def audit_normalized(path: Path) -> dict[str, object]:
     iterator = _iter_zip(path) if path.is_file() else _iter_dir(path)
     stats: dict[str, dict[str, object]] = defaultdict(
@@ -80,6 +90,9 @@ def audit_normalized(path: Path) -> dict[str, object]:
     )
     qnl: dict[tuple[str, str, int, int, int], object] = {}
     crosscheck: dict[tuple[str, str, int, int, int], object] = {}
+    entry_rows: dict[tuple[str, str, int, int, str], bytes] = {}
+    entry_duplicate_rows = 0
+    entry_conflicting_duplicate_keys = 0
 
     staged_files = 0
     for name, data in iterator:
@@ -109,6 +122,17 @@ def audit_normalized(path: Path) -> dict[str, object]:
                 qnl[_qnl_key(row)] = row["odds"]
             elif dataset == "quinella_crosscheck":
                 crosscheck[_qnl_key(row)] = row["odds"]
+            elif dataset == "entries":
+                key = _entry_key(row)
+                canonical = json.dumps(
+                    row, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+                if key in entry_rows:
+                    entry_duplicate_rows += 1
+                    if entry_rows[key] != canonical:
+                        entry_conflicting_duplicate_keys += 1
+                else:
+                    entry_rows[key] = canonical
 
     by_dataset: dict[str, dict[str, int]] = {}
     for dataset in sorted(stats):
@@ -157,10 +181,18 @@ def audit_normalized(path: Path) -> dict[str, object]:
         "status": status,
         "totals": totals,
         "by_dataset": by_dataset,
+        "entries_natural_key_duplicates": {
+            "key": "rcDate-meet-rcNo-chulNo-hrNo",
+            "unique_keys": len(entry_rows),
+            "duplicate_rows": entry_duplicate_rows,
+            "conflicting_duplicate_keys": entry_conflicting_duplicate_keys,
+            "policy": "source anomaly warning; research layer deduplicates this key deterministically",
+        },
         "quinella_crosscheck": crosscheck_report,
         "notes": [
             "schema_variants count source-field presence variants; normalized preserves source-native types and field names",
             "empty files are archival warnings, not failures",
+            "entries natural-key duplicates are source anomalies and are reported but do not fail normalized preservation",
         ],
     }
 
