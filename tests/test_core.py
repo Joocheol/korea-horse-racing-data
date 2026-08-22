@@ -363,6 +363,36 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("checksum mismatch", report["errors"][0])
 
+    def test_audit_accepts_exact_duplicates_for_results_only(self) -> None:
+        class DuplicateResultsClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                raw = (
+                    b"<response><header><resultCode>00</resultCode>"
+                    b"<resultMsg>NORMAL SERVICE.</resultMsg></header><body>"
+                    b"<items><item><meet>2</meet><rcDate>20220122</rcDate>"
+                    b"<rcNo>1</rcNo></item></items><totalCount>2</totalCount>"
+                    b"</body></response>"
+                )
+                pages = [
+                    parse_response(raw, "xml", 1),
+                    parse_response(raw, "xml", 2),
+                ]
+                if on_page is not None:
+                    for page in pages:
+                        on_page(page)
+                return pages
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            unit = RequestUnit("results", 2, "202201", race_date="20220122")
+            self.assertEqual(
+                collect_units(DuplicateResultsClient(), [unit], output),
+                (1, 0),
+            )
+            report = audit_output(output)
+            self.assertTrue(report["passed"])
+            self.assertEqual(report["audited_complete_units"], 1)
+
     def test_scoped_audit_ignores_failure_from_another_phase(self) -> None:
         class FakeClient:
             def collect_unit(self, unit, num_rows=100_000, on_page=None):
