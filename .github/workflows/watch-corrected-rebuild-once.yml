@@ -1,4 +1,4 @@
-# retrigger via merge push 2026-08-23 08:00 KST
+# one-time corrected rebuild watcher
 name: Watch corrected research rebuild once
 
 on:
@@ -9,6 +9,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/watch-corrected-rebuild-once.yml'
+  issue_comment:
+    types: [created]
 
 permissions:
   actions: read
@@ -17,6 +19,7 @@ permissions:
 
 jobs:
   report:
+    if: ${{ github.event_name != 'issue_comment' || github.event.comment.body == '/report-corrected-rebuild' }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve corrected rebuild result and report on PR 30
