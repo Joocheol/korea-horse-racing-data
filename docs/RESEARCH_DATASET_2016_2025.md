@@ -65,4 +65,28 @@
 
 ## 보존 상태
 
-로컬 실행 환경에서 통합 bundle 생성과 검증은 완료했다. GitHub Actions에서 동일 빌드를 재현하고 Dropbox `/앱/kra-data/research/2016-2025`에 보존하는 일회성 workflow를 추가했다. Dropbox 업로드는 실제 목록 조회로 파일이 확인된 뒤 성공으로 확정한다.
+GitHub Actions run `32595439823`에서 동일 빌드를 재현했고 전체 job이 `success`로 완료되었다.
+
+- 연구 bundle artifact: `kra-research-2016-2025`
+- artifact ID: `9481498381`
+- artifact size: `320,932,784` bytes
+- Dropbox upload evidence artifact: `kra-research-dropbox-evidence`
+- evidence artifact ID: `9481506837`
+
+canonical Dropbox는 repository secrets의 `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`,
+`DROPBOX_REFRESH_TOKEN`이 가리키는 기존 Dropbox 앱 계정이다. 이 계정의
+`/앱/kra-data/research/2016-2025/`에 다음 8개 파일이 Dropbox API 성공 응답과 함께 보존되었다.
+
+| 파일 | Dropbox 응답 크기 |
+| --- | ---: |
+| `SHA256SUMS` | 572 |
+| `coverage.jsonl.gz` | 125,355 |
+| `entries.jsonl.gz` | 32,692,664 |
+| `manifest.json` | 411 |
+| `odds.jsonl.gz` | 261,365,204 |
+| `races.jsonl.gz` | 492,943 |
+| `results.jsonl.gz` | 22,847,349 |
+| `sales.jsonl.gz` | 3,407,302 |
+
+외부 Dropbox 커넥터가 다른 사용자 컨텍스트를 가리킬 수 있으므로, 이 프로젝트의
+Dropbox 보존 성공 여부는 **canonical 앱 계정에 대한 GitHub Actions Dropbox API 응답과 evidence artifact**를 기준으로 판정한다.
