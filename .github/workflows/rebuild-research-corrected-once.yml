@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: kra-research-corrected-once
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-archive:
@@ -114,60 +114,131 @@ jobs:
           retention-days: 90
           compression-level: 0
 
-      - name: Upload corrected research bundle to canonical Dropbox
+      - name: Stage, verify, and promote corrected bundle in canonical Dropbox
+        env:
+          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
         run: |
           python <<'PY'
-          import base64, json, os, pathlib, urllib.parse, urllib.request
+          import base64, json, os, pathlib, urllib.parse, urllib.request, urllib.error
+
           required = ('DROPBOX_APP_KEY','DROPBOX_APP_SECRET','DROPBOX_REFRESH_TOKEN')
           missing = [x for x in required if not os.environ.get(x)]
           if missing:
               raise SystemExit('Missing Dropbox secrets: ' + ', '.join(missing))
-          credentials = base64.b64encode(f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()).decode()
-          req = urllib.request.Request(
+
+          credentials = base64.b64encode(
+              f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()
+          ).decode()
+          token_req = urllib.request.Request(
               'https://api.dropboxapi.com/oauth2/token',
-              data=urllib.parse.urlencode({'grant_type':'refresh_token','refresh_token':os.environ['DROPBOX_REFRESH_TOKEN']}).encode(),
+              data=urllib.parse.urlencode({
+                  'grant_type':'refresh_token',
+                  'refresh_token':os.environ['DROPBOX_REFRESH_TOKEN'],
+              }).encode(),
               headers={'Authorization':f'Basic {credentials}'},
           )
-          with urllib.request.urlopen(req) as response:
+          with urllib.request.urlopen(token_req) as response:
               token = json.load(response)['access_token']
           auth = {'Authorization': f'Bearer {token}'}
-          def api(url, data, headers):
+
+          def content_api(url, data, headers):
               with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers)) as response:
                   return json.load(response)
+
+          def rpc(endpoint, payload):
+              req = urllib.request.Request(
+                  f'https://api.dropboxapi.com/2/files/{endpoint}',
+                  data=json.dumps(payload, ensure_ascii=True).encode(),
+                  headers={**auth, 'Content-Type':'application/json'},
+              )
+              with urllib.request.urlopen(req) as response:
+                  return json.load(response)
+
           def commit(path):
               return {'path': path, 'mode': 'overwrite', 'autorename': False, 'mute': True}
+
           def upload(source, destination):
               size = source.stat().st_size
               chunk_size = 8 * 1024 * 1024
               if size <= 140 * 1024 * 1024:
-                  return api('https://content.dropboxapi.com/2/files/upload', source.read_bytes(), {
-                      **auth, 'Content-Type':'application/octet-stream',
-                      'Dropbox-API-Arg':json.dumps(commit(destination), ensure_ascii=True)})
+                  return content_api(
+                      'https://content.dropboxapi.com/2/files/upload',
+                      source.read_bytes(),
+                      {**auth, 'Content-Type':'application/octet-stream',
+                       'Dropbox-API-Arg':json.dumps(commit(destination), ensure_ascii=True)},
+                  )
               with source.open('rb') as h:
                   first = h.read(chunk_size)
-                  started = api('https://content.dropboxapi.com/2/files/upload_session/start', first, {
-                      **auth, 'Content-Type':'application/octet-stream',
-                      'Dropbox-API-Arg':json.dumps({'close':False})})
+                  started = content_api(
+                      'https://content.dropboxapi.com/2/files/upload_session/start', first,
+                      {**auth, 'Content-Type':'application/octet-stream',
+                       'Dropbox-API-Arg':json.dumps({'close':False})},
+                  )
                   sid = started['session_id']; offset = len(first)
                   while offset < size:
-                      chunk = h.read(chunk_size); finishing = offset + len(chunk) == size
+                      chunk = h.read(chunk_size)
+                      finishing = offset + len(chunk) == size
                       arg = {'cursor':{'session_id':sid,'offset':offset}}
                       endpoint = 'finish' if finishing else 'append_v2'
                       if finishing: arg['commit'] = commit(destination)
                       else: arg['close'] = False
-                      result = api(f'https://content.dropboxapi.com/2/files/upload_session/{endpoint}', chunk, {
-                          **auth, 'Content-Type':'application/octet-stream',
-                          'Dropbox-API-Arg':json.dumps(arg, ensure_ascii=True)})
+                      result = content_api(
+                          f'https://content.dropboxapi.com/2/files/upload_session/{endpoint}', chunk,
+                          {**auth, 'Content-Type':'application/octet-stream',
+                           'Dropbox-API-Arg':json.dumps(arg, ensure_ascii=True)},
+                      )
                       offset += len(chunk)
                   return result
-          base = '/앱/kra-data/research/2016-2025'
-          uploaded=[]
-          for source in sorted(pathlib.Path('research').iterdir()):
-              result=upload(source, f'{base}/{source.name}')
-              uploaded.append({'name':source.name,'size':result.get('size',source.stat().st_size),'path':result.get('path_display')})
+
+          run_id = os.environ['GITHUB_RUN_ID_VALUE']
+          canonical = '/앱/kra-data/research/2016-2025'
+          staging = f'/앱/kra-data/research/.staging-2016-2025-{run_id}'
+          backup = f'/앱/kra-data/research/.backup-2016-2025-{run_id}'
+          local = pathlib.Path('research')
+          expected = {p.name: p.stat().st_size for p in local.iterdir() if p.is_file()}
+          uploaded = []
+
+          for source in sorted(local.iterdir()):
+              if not source.is_file():
+                  continue
+              result = upload(source, f'{staging}/{source.name}')
+              uploaded.append({
+                  'name': source.name,
+                  'size': result.get('size', source.stat().st_size),
+                  'path': result.get('path_display'),
+              })
               print(json.dumps(uploaded[-1], ensure_ascii=False))
+
+          listing = rpc('list_folder', {'path': staging, 'recursive': False})
+          remote = {e['name']: e.get('size') for e in listing.get('entries', []) if e.get('.tag') == 'file'}
+          assert remote == expected, (remote, expected)
+
+          promotion = {'canonical': canonical, 'staging': staging, 'backup': backup, 'old_moved': False,
+                       'new_promoted': False, 'rollback': None, 'backup_cleanup': None}
+          rpc('move_v2', {'from_path': canonical, 'to_path': backup, 'autorename': False})
+          promotion['old_moved'] = True
+          try:
+              rpc('move_v2', {'from_path': staging, 'to_path': canonical, 'autorename': False})
+              promotion['new_promoted'] = True
+          except Exception as promote_error:
+              try:
+                  rpc('move_v2', {'from_path': backup, 'to_path': canonical, 'autorename': False})
+                  promotion['rollback'] = 'success'
+              except Exception as rollback_error:
+                  promotion['rollback'] = f'failed: {rollback_error}'
+              raise RuntimeError(f'promotion failed; rollback={promotion["rollback"]}') from promote_error
+
+          try:
+              rpc('delete_v2', {'path': backup})
+              promotion['backup_cleanup'] = 'success'
+          except Exception as cleanup_error:
+              promotion['backup_cleanup'] = f'warning: {cleanup_error}'
+
+          evidence = {'status':'success', 'uploaded':uploaded, 'verified_sizes':remote, 'promotion':promotion}
           pathlib.Path('dropbox-research-upload-corrected.json').write_text(
-              json.dumps({'status':'success','uploaded':uploaded},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+              json.dumps(evidence, ensure_ascii=False, indent=2)+'\n', encoding='utf-8'
+          )
+          print(json.dumps(promotion, ensure_ascii=False, indent=2))
           PY
 
       - name: Preserve corrected Dropbox upload evidence
