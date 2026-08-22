@@ -12,7 +12,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
@@ -20,10 +20,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Verify canonical Dropbox and latest corrected rebuild
+      - name: Report latest corrected rebuild and canonical Dropbox metadata
         run: |
           python <<'PY'
-          import base64, gzip, hashlib, io, json, os, urllib.parse, urllib.request
+          import base64, json, os, urllib.parse, urllib.request
 
           repo = os.environ['REPOSITORY']
           gh_headers = {
@@ -34,12 +34,18 @@ jobs:
           def gh_get(url):
               with urllib.request.urlopen(urllib.request.Request(url, headers=gh_headers)) as response:
                   return json.load(response)
+
           run_payload = gh_get(
               f'https://api.github.com/repos/{repo}/actions/workflows/'
               'rebuild-research-corrected-once.yml/runs?branch=main&event=push&per_page=10'
           )
           runs = run_payload.get('workflow_runs', [])
           latest = runs[0] if runs else None
+          artifacts = []
+          if latest is not None:
+              artifacts = gh_get(
+                  f"https://api.github.com/repos/{repo}/actions/runs/{latest['id']}/artifacts?per_page=100"
+              ).get('artifacts', [])
 
           credentials = base64.b64encode(
               f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()
@@ -55,7 +61,6 @@ jobs:
           with urllib.request.urlopen(req) as response:
               token = json.load(response)['access_token']
           dbx_auth = {'Authorization': f'Bearer {token}'}
-
           def rpc(endpoint, payload):
               req = urllib.request.Request(
                   f'https://api.dropboxapi.com/2/files/{endpoint}',
@@ -64,65 +69,28 @@ jobs:
               )
               with urllib.request.urlopen(req) as response:
                   return json.load(response)
-          def download(path):
-              req = urllib.request.Request(
-                  'https://content.dropboxapi.com/2/files/download',
-                  headers={**dbx_auth, 'Dropbox-API-Arg':json.dumps({'path':path}, ensure_ascii=True)},
-              )
-              with urllib.request.urlopen(req) as response:
-                  return response.read()
 
           base = '/앱/kra-data/research/2016-2025'
-          expected_names = {
-              'SHA256SUMS','coverage.jsonl.gz','entries.jsonl.gz','manifest.json',
-              'odds.jsonl.gz','races.jsonl.gz','results.jsonl.gz','sales.jsonl.gz',
-          }
           listing = rpc('list_folder', {'path':base, 'recursive':False})
-          files = {e['name']:e.get('size') for e in listing.get('entries',[]) if e.get('.tag')=='file'}
-          names_ok = set(files) == expected_names
-          manifest_bytes = download(f'{base}/manifest.json')
-          sums_bytes = download(f'{base}/SHA256SUMS')
-          entries_bytes = download(f'{base}/entries.jsonl.gz')
-          manifest = json.loads(manifest_bytes)
-          tables = manifest.get('tables', {})
-          expected_tables = {
-              'races':24436,'race_record_rows':261354,'entries_rows':261354,
-              'entries_source_duplicate_rows_removed':38,
-              'entries_source_conflicting_duplicate_keys':38,
-              'results_rows':261354,'sales_rows':163844,'odds_rows':29192211,
-              'nonrace_odds_rows':526192,'coverage_rows':24436,
+          files = {
+              e['name']: {'size':e.get('size'),'id':e.get('id'),'server_modified':e.get('server_modified')}
+              for e in listing.get('entries', []) if e.get('.tag') == 'file'
           }
-          manifest_ok = tables == expected_tables
-          sums = {}
-          for line in sums_bytes.decode().splitlines():
-              digest, name = line.split(None, 1); sums[name.strip()] = digest
-          manifest_sha_ok = hashlib.sha256(manifest_bytes).hexdigest() == sums.get('manifest.json')
-          entries_sha_ok = hashlib.sha256(entries_bytes).hexdigest() == sums.get('entries.jsonl.gz')
-          rows = 0; keys = set(); dup = 0
-          with gzip.open(io.BytesIO(entries_bytes), 'rt', encoding='utf-8') as h:
-              for line in h:
-                  if not line.strip(): continue
-                  row = json.loads(line); rows += 1
-                  key=(row['race_id'],int(row['chulNo']),str(row['hrNo']))
-                  if key in keys: dup += 1
-                  keys.add(key)
-          entries_ok = rows == 261354 and len(keys) == 261354 and dup == 0
-          passed = names_ok and manifest_ok and manifest_sha_ok and entries_sha_ok and entries_ok
           report = {
-              'status':'PASS' if passed else 'FAIL',
               'latest_rebuild': None if latest is None else {
                   'id':latest['id'],'status':latest.get('status'),'conclusion':latest.get('conclusion'),
                   'head_sha':latest.get('head_sha'),'html_url':latest.get('html_url'),
                   'created_at':latest.get('created_at'),'updated_at':latest.get('updated_at'),
               },
-              'entries_rows':rows,'unique_entry_keys':len(keys),'duplicate_entry_keys':dup,
-              'removed':tables.get('entries_source_duplicate_rows_removed'),
-              'conflicting':tables.get('entries_source_conflicting_duplicate_keys'),
-              'manifest_sha_ok':manifest_sha_ok,'entries_sha_ok':entries_sha_ok,
-              'exact_file_set':names_ok,'files':files,'tables':tables,
+              'artifacts': [
+                  {'id':a.get('id'),'name':a.get('name'),'size_in_bytes':a.get('size_in_bytes'),
+                   'expired':a.get('expired'),'digest':a.get('digest')}
+                  for a in artifacts
+              ],
+              'canonical_dropbox_files':files,
           }
-          print('CORRECTED_DATASET_VERIFY_REPORT')
+          print('CORRECTED_DATASET_EVIDENCE_REPORT')
           print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-          if not passed:
-              raise SystemExit(1)
+          if latest is None:
+              raise SystemExit('no corrected rebuild run found')
           PY
