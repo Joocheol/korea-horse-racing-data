@@ -45,7 +45,7 @@ def iter_paths(roots: list[Path], pattern: str) -> Iterable[Path]:
 
 def writer(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    return gzip.open(path, "wt", encoding="utf-8", newline="\n")
+    return gzip.open(path, "wt", encoding="utf-8", newline="\n", compresslevel=1)
 
 
 def emit(handle, row: dict) -> None:
