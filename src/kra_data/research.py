@@ -31,6 +31,10 @@ def make_race_id(row: dict) -> str:
     return f"{row['rcDate']}-{normalize_meet(row['meet'])}-{int(row['rcNo']):02d}"
 
 
+def entry_key(row: dict) -> tuple[str, int, str]:
+    return make_race_id(row), int(row["chulNo"]), str(row["hrNo"])
+
+
 def read_jsonl(path: Path) -> Iterable[dict]:
     with path.open(encoding="utf-8") as handle:
         for line in handle:
@@ -40,7 +44,7 @@ def read_jsonl(path: Path) -> Iterable[dict]:
 
 def iter_paths(roots: list[Path], pattern: str) -> Iterable[Path]:
     for root in roots:
-        yield from root.rglob(pattern)
+        yield from sorted(root.rglob(pattern))
 
 
 def writer(path: Path):
@@ -78,6 +82,8 @@ def build(staged_roots: list[Path], output: Path) -> dict:
         "races": len(valid),
         "race_record_rows": sum(race_record_rows.values()),
         "entries_rows": 0,
+        "entries_source_duplicate_rows_removed": 0,
+        "entries_source_conflicting_duplicate_keys": 0,
         "results_rows": 0,
         "sales_rows": 0,
         "odds_rows": 0,
@@ -92,18 +98,40 @@ def build(staged_roots: list[Path], output: Path) -> dict:
             row["race_record_rows"] = race_record_rows[rid]
             emit(handle, row)
 
-    for kind, pattern in (("entries", "entries-all.jsonl"), ("results", "results-all/date-*.jsonl")):
-        with writer(output / f"{kind}.jsonl.gz") as handle:
-            for path in iter_paths(staged_roots, pattern):
-                for row in read_jsonl(path):
-                    rid = make_race_id(row)
-                    if rid not in valid:
-                        continue
-                    row = dict(row)
-                    row["race_id"] = rid
-                    row["meet"] = normalize_meet(row["meet"])
-                    emit(handle, row)
-                    counts[f"{kind}_rows"] += 1
+    seen_entries: dict[tuple[str, int, str], str] = {}
+    with writer(output / "entries.jsonl.gz") as handle:
+        for path in iter_paths(staged_roots, "entries-all.jsonl"):
+            for row in read_jsonl(path):
+                rid = make_race_id(row)
+                if rid not in valid:
+                    continue
+                key = entry_key(row)
+                source_signature = json.dumps(
+                    row, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
+                if key in seen_entries:
+                    counts["entries_source_duplicate_rows_removed"] += 1
+                    if seen_entries[key] != source_signature:
+                        counts["entries_source_conflicting_duplicate_keys"] += 1
+                    continue
+                seen_entries[key] = source_signature
+                out = dict(row)
+                out["race_id"] = rid
+                out["meet"] = normalize_meet(row["meet"])
+                emit(handle, out)
+                counts["entries_rows"] += 1
+
+    with writer(output / "results.jsonl.gz") as handle:
+        for path in iter_paths(staged_roots, "results-all/date-*.jsonl"):
+            for row in read_jsonl(path):
+                rid = make_race_id(row)
+                if rid not in valid:
+                    continue
+                out = dict(row)
+                out["race_id"] = rid
+                out["meet"] = normalize_meet(row["meet"])
+                emit(handle, out)
+                counts["results_rows"] += 1
 
     with writer(output / "sales.jsonl.gz") as handle:
         for path in iter_paths(staged_roots, "sales-all.jsonl"):
@@ -112,11 +140,11 @@ def build(staged_roots: list[Path], output: Path) -> dict:
                 if rid not in valid:
                     continue
                 pool = POOL_MAP.get(row.get("pool"), str(row.get("pool")))
-                row = dict(row)
-                row["race_id"] = rid
-                row["meet"] = normalize_meet(row["meet"])
-                row["pool_code"] = pool
-                emit(handle, row)
+                out = dict(row)
+                out["race_id"] = rid
+                out["meet"] = normalize_meet(row["meet"])
+                out["pool_code"] = pool
+                emit(handle, out)
                 sales_pools[rid].add(pool)
                 counts["sales_rows"] += 1
 
@@ -129,11 +157,11 @@ def build(staged_roots: list[Path], output: Path) -> dict:
                         counts["nonrace_odds_rows"] += 1
                         continue
                     pool = POOL_MAP.get(row.get("pool"), str(row.get("pool")))
-                    row = dict(row)
-                    row["race_id"] = rid
-                    row["meet"] = normalize_meet(row["meet"])
-                    row["pool_code"] = pool
-                    emit(handle, row)
+                    out = dict(row)
+                    out["race_id"] = rid
+                    out["meet"] = normalize_meet(row["meet"])
+                    out["pool_code"] = pool
+                    emit(handle, out)
                     odds_pools[rid].add(pool)
                     counts["odds_rows"] += 1
 
@@ -152,6 +180,8 @@ def build(staged_roots: list[Path], output: Path) -> dict:
         "schema_version": 1,
         "race_universe": "race_record",
         "race_id_format": "YYYYMMDD-meet-rcNo",
+        "entry_key_format": "race_id-chulNo-hrNo",
+        "entry_duplicate_policy": "keep first source row in deterministic path/source order; report removed/conflicting duplicates",
         "missing_policy": "source gaps remain missing; never impute zero",
         "tables": counts,
     }
