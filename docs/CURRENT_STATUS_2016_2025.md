@@ -19,27 +19,14 @@
 2020-2021은 source run `32340684155`, artifact `9396629882`, archive run `32559614706`을 사용했다.
 세부 보존 증거는 `backfill-audit-2016-2025.json`, `pilot-audit-2020-2021.json`에 남아 있다.
 
-## 2. 2020-2021 의미 감사
+## 2. normalized/staged 계층 감사
 
-세부 근거는 `SEMANTIC_AUDIT_2020_2021.md`에 유지한다.
-
-- `race_record`, `entries`, `results`: 각 41,749 rows
-- unique race IDs: 3,659
-- 핵심 3개 테이블 간 누락 race ID: 0
-- triple이 기준 경주보다 1,276경주 적은 것은 수집 실패가 아니라 해당 경주의 삼복·삼쌍 미판매와 대응
-- sales가 없는 50경주는 ledger 완전성 검사를 통과했으므로 source-level coverage gap으로 분류
-- 원천 API가 제공하지 않은 값은 0으로 대체하지 않고 결측으로 유지
-
-### normalized/staged 계층 감사
-
-`normalized`는 코드 내부 `staged/`와 같은 논리 계층이며 source item을 JSONL 행으로 구조화한 archival staging으로 확정했다. 의미·자료형 통일은 `research`에서 수행한다.
-
-실제 artifact 감사 결과:
+`normalized`는 코드 내부 `staged/`와 같은 논리 계층이며 source item을 JSONL 행으로 구조화한 archival staging이다. 의미·자료형 통일은 `research`에서 수행한다.
 
 - 2020-2021 artifact `9396629882`: staged 2,913개, 총 4,656,969행, 파일 내부 완전 중복 0
 - legacy API227 달력 전수 방식 때문에 빈 staged 파일 1,797개가 존재하나 현재 운영 planner에서는 발생하지 않음
-- 2025 artifact `9468442238`: staged 654개, 총 3,280,645행, 빈 파일 0, 파일 내부 완전 중복 0
-- API29 QNL과 API5 복승 교차검증: 2020-2021 222,490행 및 2025 123,078행 모두 키 누락 0, 배당 불일치 0
+- production 연도 2016-2019·2022-2025의 normalized 파일 유형은 11종으로 고정
+- API29 QNL과 API5 복승 교차검증은 **2016-2025 전 기간에서 키 누락 0, 배당 불일치 0**
 - API5는 validation evidence로 raw/normalized에 유지하되 canonical `research/odds`에는 포함하지 않음
 
 재현 가능한 감사 코드와 전체 판정은 `docs/NORMALIZED_LAYER_AUDIT.md` 및 `src/kra_data/normalized_audit.py`에 유지한다.
@@ -52,8 +39,8 @@
 | --- | ---: |
 | races | 24,436 |
 | race_record rows | 261,354 |
-| entries | 261,392 |
-| results | 261,354 |
+| entries | **261,354** |
+| results | **261,354** |
 | sales | 163,844 |
 | odds | 29,192,211 |
 | non-race odds excluded | 526,192 |
@@ -67,7 +54,33 @@
 - 2016-2025 10개 연도 모두 존재
 - `race_id` 24,436개 unique, 중복 0
 - `races`와 `coverage` 행 수 일치
+- `entries` canonical key `(race_id, chulNo, hrNo)` 261,354개 unique, 중복 0
+- `entries` key와 `results` 출전마 key가 261,354개로 완전히 일치
 - 비경주·예비·취소·시험성 odds 526,192행은 raw에는 보존하되 연구 universe에서는 제외
+
+### entries 38행 초과 문제 — 해결 완료
+
+기존 research bundle의 `entries` 261,392행이 `race_record/results` 261,354행보다 38행 많았던 원인을 API26_2 source까지 추적했다.
+
+| 연도 | source duplicate 초과행 |
+| --- | ---: |
+| 2016 | 5 |
+| 2017 | 18 |
+| 2018 | 11 |
+| 2019 | 4 |
+| 2020-2025 | 0 |
+| 합계 | **38** |
+
+38행은 모두 동일 natural key `(rcDate, meet, rcNo, chulNo, hrNo)`가 두 번 나타난 API26_2 source duplicate이며, 확인된 차이는 마주명 표기·대소문자 변형이다. 서로 다른 출전마가 추가된 것이 아니다.
+
+정책은 다음과 같이 확정했다.
+
+- raw/normalized에는 source row를 원형대로 모두 보존
+- research에서만 `(race_id, chulNo, hrNo)` 기준으로 1행 유지
+- 경로와 source 순서를 결정적으로 정렬한 뒤 첫 source row 유지
+- 제거 수와 서로 내용이 다른 duplicate key 수를 manifest에 기록
+
+최종 corrected manifest는 `entries_source_duplicate_rows_removed = 38`, `entries_source_conflicting_duplicate_keys = 38`을 기록한다.
 
 ### coverage 요약
 
@@ -99,37 +112,68 @@ canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사
 - `/앱/kra-data/docs/`
 - `/앱/kra-data/research/2016-2025/`
 
-Dropbox 보존 성공 여부는 canonical 앱 계정에 대한 **GitHub Actions Dropbox API 성공 응답과 evidence**로 판정한다.
 credentials 자체는 GitHub Secrets에만 보관한다.
 
-## 5. 최종 연구 bundle 보존 증거
+## 5. corrected 최종 연구 bundle 보존 증거
 
-GitHub Actions run `32595439823`의 `build-and-archive` job은 전체 `success`였다.
+최종 권위(authoritative) rebuild는 GitHub Actions run **`32603481704`**이며 `build-and-archive` job 전체가 `success`였다.
 
-- research artifact: `kra-research-2016-2025`, ID `9481498381`, 320,932,784 bytes
-- Dropbox evidence artifact: `kra-research-dropbox-evidence`, ID `9481506837`
-- Dropbox destination: `/앱/kra-data/research/2016-2025/`
+run 내부 검증에서 다음을 직접 확인했다.
 
-Dropbox API 성공 응답 기준 파일:
+- races: 24,436
+- race_record rows: 261,354
+- entries: **261,354**
+- entries source duplicates removed: **38**
+- entries conflicting duplicate keys: **38**
+- results: 261,354
+- sales: 163,844
+- odds: 29,192,211
+- non-race odds excluded: 526,192
+- coverage: 24,436
+- canonical entry key 261,354개 unique, 중복 0
+
+Actions 보존물:
+
+- corrected research artifact: `kra-research-2016-2025-corrected`, ID **`9483598242`**, 320,934,040 bytes
+- corrected Dropbox evidence artifact: `kra-research-dropbox-evidence-corrected`, ID **`9483606967`**, 622 bytes
+
+Dropbox publish는 파일별 직접 덮어쓰기가 아니라 다음 순서로 수행했다.
+
+1. `/앱/kra-data/research/.staging-2016-2025-32603481704/`에 전체 bundle 업로드
+2. staging의 8개 파일 이름·크기를 로컬 산출물과 대조
+3. 기존 canonical 폴더를 backup으로 이동
+4. staging 폴더를 `/앱/kra-data/research/2016-2025/`로 승격
+5. 승격 성공 후 backup 삭제
+
+보존 evidence의 최종 상태는 다음과 같다.
+
+- `old_moved = true`
+- `new_promoted = true`
+- `rollback = null`
+- `backup_cleanup = success`
+
+canonical Dropbox 메타데이터 재확인 결과 모든 파일의 `server_modified`는 `2026-08-22T22:56:47Z`이며 파일 크기는 다음과 같다.
 
 | 파일 | bytes |
 | --- | ---: |
 | `SHA256SUMS` | 572 |
 | `coverage.jsonl.gz` | 125,355 |
-| `entries.jsonl.gz` | 32,692,664 |
-| `manifest.json` | 411 |
-| `odds.jsonl.gz` | 261,365,204 |
+| `entries.jsonl.gz` | **32,690,587** |
+| `manifest.json` | **685** |
+| `odds.jsonl.gz` | 261,361,771 |
 | `races.jsonl.gz` | 492,943 |
-| `results.jsonl.gz` | 22,847,349 |
-| `sales.jsonl.gz` | 3,407,302 |
+| `results.jsonl.gz` | 22,854,988 |
+| `sales.jsonl.gz` | 3,406,155 |
+
+Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본문 재다운로드가 아니라 **성공한 corrected rebuild의 내부 내용 검증 + Dropbox staging 크기 검증 + 원자적 승격 evidence + canonical 파일 메타데이터 재확인**을 결합해 판정한다.
 
 ## 6. 최종 판정과 남은 품질 점검
 
-**2016-2025 KRA 공개 API 수집·통합·Dropbox 보존은 완료 상태다.**
-재수집이나 과거 일회성 archive workflow를 운영 단계에서 반복할 필요는 없다.
+**2016-2025 KRA 공개 API 수집·normalized 감사·통합 연구 데이터 정리·corrected canonical Dropbox 보존은 완료 상태다.**
 
-남은 데이터 품질 점검은 연구 단계에서 수행한다.
+`entries` 38행 초과 문제는 원인을 확정하고 corrected research bundle에 반영했으므로 더 이상 남은 품질 점검 항목이 아니다. 과거 일회성 archive/rebuild workflow는 운영 단계에서 유지하지 않는다.
 
-1. `entries`가 `race_record/results`보다 38행 많은 원인 확인
-2. sales/odds coverage 이상치 목록 확정
-3. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교
+남은 연구 단계 품질 점검은 다음 두 항목이다.
+
+1. sales/odds coverage 이상치 목록 확정
+2. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교

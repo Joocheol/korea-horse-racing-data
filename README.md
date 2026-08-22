@@ -4,15 +4,17 @@
 
 ## 현재 상태
 
-**2016-2025년 10개년 KRA 공개 API 수집·통합·Dropbox 보존은 완료 상태입니다.**
+**2016-2025년 10개년 KRA 공개 API 수집·통합·corrected canonical Dropbox 보존은 완료 상태입니다.**
 
 - 총 8,123개 논리 수집 단위 기술 감사 완료, 오류 0
 - 2020·2021 기존 수집 artifact 재사용 및 의미 감사 완료
 - normalized/staged 계층 역할·중복·schema 감사 완료
 - 통합 연구용 race universe: 24,436경주
+- canonical entries/results: 각 **261,354행**
+- API26_2 source duplicate 38행은 raw/normalized에 보존하고 research에서 natural key 기준으로 정리
 - 통합 odds: 29,192,211행
 - `race_id` 중복: 0
-- canonical Dropbox 연구 bundle 보존 완료
+- corrected canonical Dropbox 연구 bundle 보존 완료
 - 원천 API가 제공하지 않는 값은 0으로 대체하지 않고 coverage gap으로 유지
 
 최종 수치, GitHub Actions run, artifact, Dropbox 보존 증거는
@@ -29,6 +31,7 @@
 - `API227`은 `API4_3`에서 발견한 실제 경주일만 호출합니다.
 - 비경주·예비·취소·시험성 기록은 raw에는 보존하되 연구용 race universe에서는 제외합니다.
 - normalized/staged는 source item을 JSONL로 구조화하는 계층이며 의미·자료형 통일은 research에서 수행합니다.
+- API5는 API29 복승의 validation evidence로 raw/normalized에 유지하고 research odds에는 중복 포함하지 않습니다.
 
 ## Dropbox
 
@@ -38,7 +41,7 @@ canonical Dropbox는 GitHub Actions repository secrets의
 
 ## 문서
 
-- **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 최종 수집·통합·Dropbox 보존 상태
+- **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 최종 수집·통합·corrected Dropbox 보존 상태
 - **[docs/NORMALIZED_LAYER_AUDIT.md](docs/NORMALIZED_LAYER_AUDIT.md)** — normalized/staged 계층의 역할, 실제 artifact 감사, 중복·schema 판정
 - **[docs/API_FINDINGS.md](docs/API_FINDINGS.md)** — KRA 공개 API 조사 결과
 - **[docs/COLLECTION_FORMATS.md](docs/COLLECTION_FORMATS.md)** — API 형식·호출량·저장 규칙
