@@ -1,0 +1,46 @@
+name: Watch corrected research rebuild once
+
+on:
+  workflow_run:
+    workflows: ['Rebuild corrected 2016-2025 research dataset once']
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    if: ${{ github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report completion on PR 30
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python <<'PY'
+          import json, os, urllib.request
+          body = (
+              f"Corrected research rebuild completed: conclusion={os.environ['CONCLUSION']}; "
+              f"run_id={os.environ['RUN_ID']}; head_sha={os.environ['HEAD_SHA']}; "
+              f"run={os.environ['RUN_URL']}"
+          )
+          url = f"https://api.github.com/repos/{os.environ['REPOSITORY']}/issues/30/comments"
+          req = urllib.request.Request(
+              url,
+              data=json.dumps({'body': body}).encode(),
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json',
+              },
+          )
+          with urllib.request.urlopen(req) as response:
+              print(response.status)
+          PY
