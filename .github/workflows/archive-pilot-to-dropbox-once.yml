@@ -245,7 +245,7 @@ jobs:
                       {
                           **auth,
                           "Content-Type": "application/octet-stream",
-                          "Dropbox-API-Arg": json.dumps(commit(destination), ensure_ascii=False),
+                          "Dropbox-API-Arg": json.dumps(commit(destination), ensure_ascii=True),
                       },
                   )
               with source.open("rb") as handle:
@@ -276,7 +276,7 @@ jobs:
                           {
                               **auth,
                               "Content-Type": "application/octet-stream",
-                              "Dropbox-API-Arg": json.dumps(argument, ensure_ascii=False),
+                              "Dropbox-API-Arg": json.dumps(argument, ensure_ascii=True),
                           },
                       )
                       offset += len(chunk)
