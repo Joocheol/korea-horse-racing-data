@@ -1,130 +1,121 @@
-# 2016-2025 현재 보존·검증 상태
+# 2016-2025 최종 데이터셋 상태
 
-*확인일: 2026-08-22*
+*최종 정리: 2026-08-23*
 
-이 문서는 2016-2025년 10개년 KRA 공개 API 수집물의 현재 보존, 병합, 검증 상태를
-요약한다. 2020·2021년은 이미 수집 완료된 GitHub Actions artifact를 사용했으며
-재수집하지 않았다.
+이 문서는 2016-2025년 KRA 공개 API 수집, 검증, 통합 연구용 데이터셋, Dropbox 보존 상태를 한 곳에 정리한 **단일 최종 상태 문서**다.
 
-## 1. 범위
+## 1. 수집 범위와 완료 판정
 
-대상 API는 `API28_1`, `API29_1`, `API30_1`, `API179_1`, `API26_2`, `API227`,
-`API4_3`, `API5`이다.
+대상 API는 `API28_1`, `API29_1`, `API30_1`, `API179_1`, `API26_2`, `API227`, `API4_3`, `API5`이다.
+서울·제주·부경, 2016-2025년 10개년을 대상으로 총 8,123개 논리 수집 단위를 감사했다.
 
-| 연도 | 출처 | 상태 |
-| --- | --- | --- |
-| 2016, 2017, 2018, 2019 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 |
-| 2020, 2021 | 기존 `kra-collection-state` artifact | 기술·의미 감사 통과, Dropbox 보존 성공 |
-| 2022, 2023, 2024, 2025 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 |
+| 구간 | 논리 단위 | 상태 |
+| --- | ---: | --- |
+| 2016-2019, 2022-2025 | 5,210 | complete, 오류 0 |
+| 2020-2021 | 2,913 | complete, 오류 0 |
+| 전체 | 8,123 | complete, 오류 0 |
 
-총 논리 수집 단위는 8,123개다. 이 중 2016·2017·2018·2019·2022·2023·2024·2025
-backfill 단위가 5,210개이고, 2020·2021 pilot 단위가 2,913개다.
+2016-2019·2022-2025는 source run `32544887677`, archive run `32553067249`에서 검증했고,
+2020-2021은 source run `32340684155`, artifact `9396629882`, archive run `32559614706`을 사용했다.
+세부 보존 증거는 `backfill-audit-2016-2025.json`, `pilot-audit-2020-2021.json`에 남아 있다.
 
-## 2. 지속 보존 증거
+## 2. 2020-2021 의미 감사
 
-2016·2017·2018·2019·2022·2023·2024·2025는
-`docs/backfill-audit-2016-2025.json`에 보존 감사 결과가 남아 있다.
-
-- archive run: `32553067249`
-- source run: `32544887677`
-- source status: `success`
-- Dropbox upload status: `success`
-- 기술 감사: 5,210 / 5,210 complete, 오류 0건
-
-2020·2021은 `docs/pilot-audit-2020-2021.json`에 보존 감사 결과가 남아 있다.
-
-- source artifact: `9396629882` (`kra-collection-state`)
-- source run: `32340684155`
-- archive run: `32559614706`
-- Dropbox upload status: `success`
-- 기술 감사: 2,913 / 2,913 complete, 오류 0건
-
-Dropbox archive에는 2020·2021 `raw`, `normalized`, `manifests`, `quarantine`, `docs`
-패키지와 SHA256 manifest의 업로드 성공 경로·크기·content hash·revision이 기록되어 있다.
-
-## 3. 기술 감사 결과
-
-전체 8,123개 논리 수집 단위는 감사 기준상 `complete`이다.
-
-| 구간 | 논리 단위 | 완료 | 오류 |
-| --- | ---: | ---: | ---: |
-| 2016 | 653 | 653 | 0 |
-| 2017 | 648 | 648 | 0 |
-| 2018 | 648 | 648 | 0 |
-| 2019 | 648 | 648 | 0 |
-| 2020 | 1,458 | 1,458 | 0 |
-| 2021 | 1,455 | 1,455 | 0 |
-| 2022 | 648 | 648 | 0 |
-| 2023 | 657 | 657 | 0 |
-| 2024 | 654 | 654 | 0 |
-| 2025 | 654 | 654 | 0 |
-
-2020·2021 artifact의 ledger 재검산 결과, 모든 group에서
-`totalCount = raw rows = unique rows`가 성립했고 중복 row는 0건이다.
-
-| 연도 | 논리 단위 | totalCount | raw rows | unique rows | duplicate rows |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 2020 | 1,458 | 1,450,364 | 1,450,364 | 1,450,364 | 0 |
-| 2021 | 1,455 | 3,206,605 | 3,206,605 | 3,206,605 | 0 |
-
-## 4. 2020·2021 API별 행 수 검산
-
-| 연도 | API | 논리 단위 | totalCount/raw/unique rows | duplicate rows |
-| --- | --- | ---: | ---: | ---: |
-| 2020 | `API179_1` | 36 | 7,353 | 0 |
-| 2020 | `API227` | 1,098 | 17,962 | 0 |
-| 2020 | `API26_2` | 36 | 17,962 | 0 |
-| 2020 | `API28_1` | 36 | 36,389 | 0 |
-| 2020 | `API29_1` | 108 | 227,152 | 0 |
-| 2020 | `API30_1` | 72 | 1,030,582 | 0 |
-| 2020 | `API4_3` | 36 | 17,962 | 0 |
-| 2020 | `API5` | 36 | 95,002 | 0 |
-| 2021 | `API179_1` | 36 | 12,914 | 0 |
-| 2021 | `API227` | 1,095 | 23,787 | 0 |
-| 2021 | `API26_2` | 36 | 23,787 | 0 |
-| 2021 | `API28_1` | 36 | 47,584 | 0 |
-| 2021 | `API29_1` | 108 | 447,929 | 0 |
-| 2021 | `API30_1` | 72 | 2,499,329 | 0 |
-| 2021 | `API4_3` | 36 | 23,787 | 0 |
-| 2021 | `API5` | 36 | 127,488 | 0 |
-
-## 5. 경주 ID 의미 감사
-
-세부 결과는 `docs/SEMANTIC_AUDIT_2020_2021.md`에 기록했다.
-
-핵심 경주 universe는 일치한다.
+세부 근거는 `SEMANTIC_AUDIT_2020_2021.md`에 유지한다.
 
 - `race_record`, `entries`, `results`: 각 41,749 rows
 - unique race IDs: 3,659
-- 핵심 3개 테이블 간 누락 race ID: 0건
+- 핵심 3개 테이블 간 누락 race ID: 0
+- triple이 기준 경주보다 1,276경주 적은 것은 수집 실패가 아니라 해당 경주의 삼복·삼쌍 미판매와 대응
+- sales가 없는 50경주는 ledger 완전성 검사를 통과했으므로 source-level coverage gap으로 분류
+- 원천 API가 제공하지 않은 값은 0으로 대체하지 않고 결측으로 유지
 
-배당 계층에는 기준 경주 universe 밖 기록이 일부 존재하지만, 이들은 `sales`,
-`entries`, `results`, `race_record`가 없는 비경주/예비·취소·시험성 기록이며 분석용
-race universe에서 제외하고 raw에는 보존한다.
+## 3. 통합 연구용 데이터셋
 
-`triple`의 기준 경주 대비 1,276경주 부재는 수집 실패가 아니다. 이 1,276경주는
-**전부 `sales`에 삼복·삼쌍 승식이 존재하지 않는다.** 그중 1,249경주는
-단식·연식·복식만 판매된 것으로 나타나고, 27경주는 sales 행 자체가 없다.
-반대로 triple이 존재하면서 sales가 있는 2,360경주는 7개 승식이 모두 확인된다.
+공통 키는 `race_id = YYYYMMDD-meet-rcNo`이다. `race_record`를 연구용 race universe로 사용한다.
 
-`sales`는 실제 시행 3,659경주 중 3,609경주에 존재하고 50경주에는 없다. ledger상
-`API179_1`의 해당 월·경마장 단위는 모두 `totalCount = raw = unique`이므로, 이 50경주는
-수집 누락이 아니라 원천 API의 source-level coverage gap으로 분류한다. 연구용 자료에서는
-0으로 대체하지 않고 `sales_missing`으로 표시한다.
+| 테이블/항목 | 행·경주 수 |
+| --- | ---: |
+| races | 24,436 |
+| race_record rows | 261,354 |
+| entries | 261,392 |
+| results | 261,354 |
+| sales | 163,844 |
+| odds | 29,192,211 |
+| non-race odds excluded | 526,192 |
+| coverage | 24,436 |
 
-## 6. 최종 판정
+산출 파일은 `races.jsonl.gz`, `entries.jsonl.gz`, `results.jsonl.gz`, `sales.jsonl.gz`, `odds.jsonl.gz`, `coverage.jsonl.gz`, `manifest.json`, `SHA256SUMS`이다.
+통합 빌더는 `src/kra_data/research.py`에 있다.
 
-**2016-2025 KRA 공개 API 수집·보존 작업은 완료로 판정한다.**
+검증 결과:
 
-근거는 다음과 같다.
+- 2016-2025 10개 연도 모두 존재
+- `race_id` 24,436개 unique, 중복 0
+- `races`와 `coverage` 행 수 일치
+- 비경주·예비·취소·시험성 odds 526,192행은 raw에는 보존하되 연구 universe에서는 제외
 
-- 10개년 8,123개 논리 수집 단위 전부 complete, 오류 0
-- 2020·2021 모든 group에서 `totalCount = raw rows = unique rows`, 중복 0
-- 실제 경주 핵심 universe 3개 테이블 완전 일치
-- 2020·2021 triple coverage 차이는 판매 승식 범위 차이와 정확히 대응
-- source-level coverage gap은 별도 flag 대상으로 분리
-- 10개년 raw/normalized/manifests 계층의 Dropbox 보존 감사 성공 기록 존재
+### coverage 요약
 
-따라서 이후 단계는 **재수집이 아니라 연구용 10개년 통합 테이블 구축**이다.
-원천 API가 제공하지 않은 값은 결측 flag를 유지하고, 비경주/시험성 기록은 raw에 보존하되
-분석 universe에서는 제외한다.
+| 항목 | 경주 수 |
+| --- | ---: |
+| sales 전체 미제공 | 145 |
+| 삼복·삼쌍 매출 모두 미제공 | 1,394 |
+| sales WIN / PLC / QNL | 각 24,291 |
+| sales EXA / QPL / TLA | 각 23,042 |
+| sales TRI | 21,845 |
+| odds WIN / QNL | 각 24,420 |
+| odds PLC | 24,403 |
+| odds EXA / QPL | 각 23,144 |
+| odds TLA | 23,160 |
+| odds TRI | 21,950 |
+
+## 4. canonical Dropbox
+
+이 프로젝트의 Dropbox 정본은 **GitHub Actions repository secrets**의
+`DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`이 가리키는 기존 Dropbox 앱 계정이다.
+다른 Dropbox 연결이나 외부 커넥터 계정은 보존 완료 판정에 사용하지 않는다.
+
+canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사용한다.
+
+- `/앱/kra-data/raw/`
+- `/앱/kra-data/normalized/`
+- `/앱/kra-data/manifests/`
+- `/앱/kra-data/quarantine/`
+- `/앱/kra-data/docs/`
+- `/앱/kra-data/research/2016-2025/`
+
+Dropbox 보존 성공 여부는 canonical 앱 계정에 대한 **GitHub Actions Dropbox API 성공 응답과 evidence**로 판정한다.
+credentials 자체는 GitHub Secrets에만 보관한다.
+
+## 5. 최종 연구 bundle 보존 증거
+
+GitHub Actions run `32595439823`의 `build-and-archive` job은 전체 `success`였다.
+
+- research artifact: `kra-research-2016-2025`, ID `9481498381`, 320,932,784 bytes
+- Dropbox evidence artifact: `kra-research-dropbox-evidence`, ID `9481506837`
+- Dropbox destination: `/앱/kra-data/research/2016-2025/`
+
+Dropbox API 성공 응답 기준 파일:
+
+| 파일 | bytes |
+| --- | ---: |
+| `SHA256SUMS` | 572 |
+| `coverage.jsonl.gz` | 125,355 |
+| `entries.jsonl.gz` | 32,692,664 |
+| `manifest.json` | 411 |
+| `odds.jsonl.gz` | 261,365,204 |
+| `races.jsonl.gz` | 492,943 |
+| `results.jsonl.gz` | 22,847,349 |
+| `sales.jsonl.gz` | 3,407,302 |
+
+## 6. 최종 판정과 남은 품질 점검
+
+**2016-2025 KRA 공개 API 수집·통합·Dropbox 보존은 완료 상태다.**
+재수집이나 과거 일회성 archive workflow를 운영 단계에서 반복할 필요는 없다.
+
+남은 데이터 품질 점검은 연구 단계에서 수행한다.
+
+1. `entries`가 `race_record/results`보다 38행 많은 원인 확인
+2. sales/odds coverage 이상치 목록 확정
+3. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교
