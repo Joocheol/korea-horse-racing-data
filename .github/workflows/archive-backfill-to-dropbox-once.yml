@@ -1,11 +1,7 @@
 name: Archive audited KRA backfill to Dropbox once
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/archive-backfill-to-dropbox-once.yml
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -27,6 +23,20 @@ jobs:
       DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
     steps:
+      - name: Require Dropbox repository secrets
+        id: preflight
+        run: |
+          missing=()
+          for name in DROPBOX_APP_KEY DROPBOX_APP_SECRET DROPBOX_REFRESH_TOKEN; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Missing required repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Checkout immutable revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -236,7 +246,6 @@ jobs:
 
       - name: Upload audited packages to Dropbox
         id: dropbox
-        continue-on-error: true
         run: |
           python <<'PY'
           import base64
@@ -361,7 +370,7 @@ jobs:
           PY
 
       - name: Publish durable archive evidence
-        if: ${{ always() }}
+        if: ${{ always() && steps.preflight.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
@@ -444,7 +453,7 @@ jobs:
           PY
 
       - name: Require Dropbox completion
-        if: ${{ always() }}
+        if: ${{ always() && steps.preflight.outcome == 'success' }}
         run: |
           python <<'PY'
           import json
