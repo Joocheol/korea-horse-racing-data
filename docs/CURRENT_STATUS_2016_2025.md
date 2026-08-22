@@ -82,20 +82,21 @@
 
 최종 corrected manifest는 `entries_source_duplicate_rows_removed = 38`, `entries_source_conflicting_duplicate_keys = 38`을 기록한다.
 
-### coverage 요약
+### coverage 감사 — 해결 완료
 
-| 항목 | 경주 수 |
-| --- | ---: |
-| sales 전체 미제공 | 145 |
-| 삼복·삼쌍 매출 모두 미제공 | 1,394 |
-| sales WIN / PLC / QNL | 각 24,291 |
-| sales EXA / QPL / TLA | 각 23,042 |
-| sales TRI | 21,845 |
-| odds WIN / QNL | 각 24,420 |
-| odds PLC | 24,403 |
-| odds EXA / QPL | 각 23,144 |
-| odds TLA | 23,160 |
-| odds TRI | 21,950 |
+coverage gap 전수 감사 결과는 `docs/COVERAGE_GAP_AUDIT_2016_2025.md`에 정리했고,
+race-level source anomaly 161건은 `docs/coverage-anomalies-2016-2025.csv`에 보존한다.
+
+핵심 판정:
+
+- API179 sales source gap: **145경주**. 모든 경주에서 적어도 3개 이상의 odds 승식이 존재하므로 경주 미시행/전체 미판매가 아니라 source-level gap으로 분류.
+- 이 중 2020-02-23 서울 11경주 + 부경 6경주, 총 **17경주**는 PLC odds도 동반 미제공.
+- 2025-10-17 제주 8경주 + 부경 8경주, 총 **16경주**는 sales와 TLA/TRI odds는 있으나 WIN/PLC/QNL/EXA/QPL odds가 없다. 2025 source artifact에서도 해당 날짜 `single-all` 및 `double-*` normalized 행이 0임을 확인해 source endpoint gap으로 확정.
+- TRI의 2016-06-10 도입 전 **1,210경주** 공백은 구조적 pre-introduction gap.
+- 2020-06-19~2021-09-05 사이 **1,276경주**에서 EXA/QPL/TLA/TRI가 모두 없고 WIN/PLC/QNL만 존재하는 패턴은 당시 무고객 경마의 단승·연승·복승 제한 발매와 일치하는 구조적 COVID regime.
+
+따라서 현재 확인된 coverage gap 중 **재수집으로 해결해야 할 race-level collection failure는 발견되지 않았다.**
+source anomaly는 결측으로 유지하며 0으로 대체하지 않는다.
 
 ## 4. canonical Dropbox
 
@@ -169,11 +170,10 @@ Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본
 
 ## 6. 최종 판정과 남은 품질 점검
 
-**2016-2025 KRA 공개 API 수집·normalized 감사·통합 연구 데이터 정리·corrected canonical Dropbox 보존은 완료 상태다.**
+**2016-2025 KRA 공개 API 수집·normalized 감사·coverage 감사·통합 연구 데이터 정리·corrected canonical Dropbox 보존은 완료 상태다.**
 
-`entries` 38행 초과 문제는 원인을 확정하고 corrected research bundle에 반영했으므로 더 이상 남은 품질 점검 항목이 아니다. 과거 일회성 archive/rebuild workflow는 운영 단계에서 유지하지 않는다.
+`entries` 38행 초과 문제와 sales/odds coverage 이상치는 모두 원인을 분류하고 문서화했으므로 더 이상 남은 품질 점검 항목이 아니다. 과거 일회성 archive/rebuild workflow는 운영 단계에서 유지하지 않는다.
 
-남은 연구 단계 품질 점검은 다음 두 항목이다.
+남은 연구 단계 품질 점검은 다음 한 항목이다.
 
-1. sales/odds coverage 이상치 목록 확정
-2. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교
+1. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교
