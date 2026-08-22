@@ -23,6 +23,15 @@ class NormalizedAuditTests(unittest.TestCase):
         cross = {key: value for key, value in qnl.items() if key != "pool"}
         if mismatch:
             cross["odds"] = 3.5
+        entry1 = {
+            "rcDate": 20160717,
+            "meet": "서울",
+            "rcNo": 5,
+            "chulNo": 6,
+            "hrNo": "0029850",
+            "owName": "링크폴로",
+        }
+        entry2 = dict(entry1, owName="(주)링크폴로")
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(
                 "output/staged/2025/202501/meet-1/double-qnl.jsonl",
@@ -36,6 +45,13 @@ class NormalizedAuditTests(unittest.TestCase):
                 "output/staged/2025/202501/meet-1/results-all/date-20250101.jsonl",
                 "",
             )
+            archive.writestr(
+                "output/staged/2016/201607/meet-1/entries-all.jsonl",
+                json.dumps(entry1, ensure_ascii=False)
+                + "\n"
+                + json.dumps(entry2, ensure_ascii=False)
+                + "\n",
+            )
 
     def test_matching_crosscheck_passes_and_empty_file_is_warning(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -43,9 +59,13 @@ class NormalizedAuditTests(unittest.TestCase):
             self._write_zip(path)
             report = audit_normalized(path)
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["totals"]["staged_files"], 3)
+        self.assertEqual(report["totals"]["staged_files"], 4)
         self.assertEqual(report["totals"]["empty_files"], 1)
         self.assertEqual(report["quinella_crosscheck"]["status"], "pass")
+        entries = report["entries_natural_key_duplicates"]
+        self.assertEqual(entries["unique_keys"], 1)
+        self.assertEqual(entries["duplicate_rows"], 1)
+        self.assertEqual(entries["conflicting_duplicate_keys"], 1)
 
     def test_odds_mismatch_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
