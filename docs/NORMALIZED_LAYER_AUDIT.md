@@ -14,13 +14,44 @@
 | --- | --- | --- | --- |
 | `raw` | 원천 증거 | 없음 | 파싱, 값 변경, 결측 대체 |
 | `normalized` (`staged`) | 원천 레코드를 공통 JSONL 행으로 구조화 | JSON/XML item을 1행 JSON으로 변환, API227의 완전히 동일한 중복행 제거 | cross-API 조인, `race_id` 추가, 승식 코드 통일, 자료형 강제 통일, 결측 0 대체, 연구 표본 필터 |
-| `research` | 실제 연구용 canonical 데이터 | `race_id`, `meet`, `pool_code` 표준화, API별 파일 통합, 연구 race universe 적용, coverage 생성 | 원천에 없는 값을 임의 생성하거나 결측을 0으로 대체 |
+| `research` | 실제 연구용 canonical 데이터 | `race_id`, `meet`, `pool_code` 표준화, API별 파일 통합, 자연키 중복 정리, 연구 race universe 적용, coverage 생성 | 원천에 없는 값을 임의 생성하거나 결측을 0으로 대체 |
 
 따라서 `normalized`라는 이름의 의미는 **structural normalization**이며 semantic normalization은 `research`에서 수행한다.
 
-## 실제 artifact 감사
+## 실제 artifact 전수 감사
 
-### 2020-2021 완전수집 artifact
+### production 방식: 2016-2019, 2022-2025
+
+GitHub Actions run `32544887677`의 연도별 `kra-backfill-YYYY` artifact를 전수 확인했다.
+
+| 연도 | staged JSONL | 총 행 | 빈 파일 | results 파일 | 비고 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 2016 | 653 | 2,703,042 | 12 | 293 | 빈 파일 12개는 모두 `triple-tri` |
+| 2017 | 648 | 3,742,259 | 0 | 288 | 정상 |
+| 2018 | 648 | 3,767,623 | 0 | 288 | 정상 |
+| 2019 | 648 | 3,886,005 | 0 | 288 | 정상 |
+| 2022 | 648 | 3,385,413 | 0 | 288 | 정상 |
+| 2023 | 657 | 3,364,878 | 0 | 297 | 정상 |
+| 2024 | 654 | 3,156,359 | 0 | 294 | 정상 |
+| 2025 | 654 | 3,280,645 | 0 | 294 | 정상 |
+
+2016의 `triple-tri` 빈 파일은 해당 월/경마장에서 source가 반환한 행이 없는 구조적 공백이며, raw/normalized 보존 원칙상 그대로 유지한다. 빈 파일 자체를 수집 실패로 판정하지 않는다.
+
+모든 production 연도에서 normalized 파일 유형은 다음 11종으로 고정된다.
+
+- `single-all.jsonl`
+- `double-qnl.jsonl`
+- `double-exa.jsonl`
+- `double-qpl.jsonl`
+- `triple-tla.jsonl`
+- `triple-tri.jsonl`
+- `sales-all.jsonl`
+- `entries-all.jsonl`
+- `race_record-all.jsonl`
+- `results-all/date-YYYYMMDD.jsonl`
+- `quinella_crosscheck-all.jsonl`
+
+### 2020-2021 legacy pilot artifact
 
 대상: GitHub Actions artifact `kra-collection-state`, ID `9396629882`.
 
@@ -47,29 +78,55 @@
 | triple-tri | 3,025,638 |
 | quinella_crosscheck | 222,490 |
 
-### 2025 production artifact
+## entries 38행 초과 문제: 원인 확정 및 research 처리
 
-대상: GitHub Actions artifact `kra-backfill-2025`, ID `9468442238`.
+최종 research bundle에서 `entries`가 `race_record/results`보다 38행 많았던 원인을 natural key
+`(rcDate, meet, rcNo, chulNo, hrNo)`로 추적했다.
 
-- staged JSONL 파일: 654개
-- 총 행: 3,280,645
-- 빈 staged 파일: 0
-- 파일 내부 완전 중복행: 0
-- entries schema presence variants: 4
-- race_record schema presence variants: 3
-- results schema presence variants: 2
+| 연도 | entries 행 | race_record 행 | 초과 행 | natural-key 초과 |
+| --- | ---: | ---: | ---: | ---: |
+| 2016 | 29,346 | 29,341 | 5 | 5 |
+| 2017 | 28,914 | 28,896 | 18 | 18 |
+| 2018 | 28,507 | 28,496 | 11 | 11 |
+| 2019 | 29,196 | 29,192 | 4 | 4 |
+| 2022-2025 | 동일 | 동일 | 0 | 0 |
+| 합계 | - | - | **38** | **38** |
 
-schema variant는 오류로 판정하지 않는다. 원천 API에서 선택적으로 빠지는 필드와 JSON/XML의 source-native 표현 차이를 normalized 계층이 그대로 보존하기 때문이다.
+38개 모두 동일 natural key가 API26_2 응답 안에서 두 번 나타난 source duplicate다. 서로 다른 출전마가 추가된 것이 아니다. 중복 두 행의 차이는 확인된 전 사례에서 마주명(`owName`, `owNameEn`) 표기 변형뿐이었다.
+
+대표 예:
+
+- `요시다 가츠미` ↔ `요시다가츠미`
+- `YOSHIDA Katsumi` ↔ `Yoshida Katsumi`
+- `(주)링크폴로` ↔ `링크폴로`
+- `Linkpolo` ↔ `LINKPOLO`
+
+정책은 다음과 같이 확정한다.
+
+- raw/normalized에는 source duplicate를 그대로 보존한다.
+- normalized audit는 이를 natural-key source anomaly로 집계하되 실패로 처리하지 않는다.
+- research의 `entries`는 `(race_id, chulNo, hrNo)`를 canonical key로 사용해 1행만 유지한다.
+- 파일 경로와 source 순서를 결정적으로 정렬한 후 처음 나온 source row를 유지한다.
+- 제거된 중복 수와 서로 내용이 다른 duplicate key 수를 `manifest.json`에 기록한다.
+
+이 수정 후 예상 canonical `entries` 행 수는 **261,354행**으로 `results`와 일치한다.
 
 ## API5 복승 교차검증 자료
 
 `API5` (`quinella_crosscheck`)는 `API29_1`의 복승(`double-qnl`)과 내용이 중복되지만 삭제하지 않는다. 역할이 **독립 endpoint에 의한 검증 증거**이기 때문이다.
 
-감사 결과:
+전수 감사 결과:
 
 | 표본 | double-qnl 행 | API5 행 | 키 누락 | 배당 불일치 |
 | --- | ---: | ---: | ---: | ---: |
+| 2016 | 142,087 | 142,087 | 0 | 0 |
+| 2017 | 138,401 | 138,401 | 0 | 0 |
+| 2018 | 137,909 | 137,909 | 0 | 0 |
+| 2019 | 142,544 | 142,544 | 0 | 0 |
 | 2020-2021 | 222,490 | 222,490 | 0 | 0 |
+| 2022 | 123,629 | 123,629 | 0 | 0 |
+| 2023 | 126,478 | 126,478 | 0 | 0 |
+| 2024 | 120,230 | 120,230 | 0 | 0 |
 | 2025 | 123,078 | 123,078 | 0 | 0 |
 
 따라서 다음 정책을 확정한다.
@@ -113,13 +170,14 @@ PYTHONPATH=src python -m kra_data.normalized_audit kra-backfill-2025.zip \
 - 빈 파일 수
 - source-field presence 기준 schema variant 수
 - 파일 내부 완전 중복행
+- entries natural-key duplicate 및 conflicting duplicate 수
 - API29 QNL과 API5의 natural-key coverage 및 odds 일치 여부
 
-완전 중복행이 있거나 QNL 교차검증이 불일치하면 감사 명령은 실패 코드로 종료한다. 빈 파일과 source-field presence variant는 경고/기술 통계이지 자동 실패 사유가 아니다.
+완전 중복행이 있거나 QNL 교차검증이 불일치하면 감사 명령은 실패 코드로 종료한다. 빈 파일, source-field presence variant, entries natural-key source duplicate는 경고/기술 통계이며 자동 실패 사유가 아니다.
 
 ## 최종 판정
 
-현재 계층을 새로 뜯어고칠 필요는 없다. 다만 명칭과 역할을 다음처럼 이해해야 한다.
+현재 계층을 새로 뜯어고칠 필요는 없다. 다만 명칭과 역할을 다음처럼 이해한다.
 
 ```text
 KRA API
