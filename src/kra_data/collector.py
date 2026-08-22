@@ -12,10 +12,17 @@ from .errors import TransientAPIError, ValidationError
 from .ledger import Ledger
 from .models import RequestUnit
 from .storage import atomic_write_bytes, canonical_json, write_immutable_bytes
-from .validation import ValidationSummary, validate_pages
+from .validation import ValidationSummary, unique_rows, validate_pages
 
 
-def _write_raw_pages(output_dir: Path, unit: RequestUnit, pages: list[Page], prefix: str) -> list[dict[str, object]]:
+def _write_raw_pages(
+    output_dir: Path,
+    unit: RequestUnit,
+    pages: list[Page],
+    prefix: str,
+    *,
+    preserve_conflicts: bool = False,
+) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     expected_format = ENDPOINTS[unit.endpoint].response_format
     for page in pages:
@@ -24,14 +31,30 @@ def _write_raw_pages(output_dir: Path, unit: RequestUnit, pages: list[Page], pre
         if page.response_format != expected_format:
             raise ValueError(f"unexpected response format: {page.response_format}")
         relative = f"{prefix}/{unit.raw_page_relative_path(page.page_no)}"
-        digest = write_immutable_bytes(output_dir / relative, page.raw_body)
-        records.append({
+        conflict_with: str | None = None
+        try:
+            digest = write_immutable_bytes(output_dir / relative, page.raw_body)
+        except FileExistsError:
+            if not preserve_conflicts:
+                raise
+            conflict_with = relative
+            run_id = os.environ.get("GITHUB_RUN_ID", "local")
+            attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+            relative = (
+                f"raw-revisions/run-{run_id}-attempt-{attempt}/"
+                f"{unit.raw_page_relative_path(page.page_no)}"
+            )
+            digest = write_immutable_bytes(output_dir / relative, page.raw_body)
+        record: dict[str, object] = {
             "page_no": page.page_no,
             "path": relative,
             "sha256": digest,
             "format": page.response_format,
             "bytes": len(page.raw_body),
-        })
+        }
+        if conflict_with is not None:
+            record["conflict_with"] = conflict_with
+        records.append(record)
     return records
 
 
@@ -65,10 +88,17 @@ def collect_one(
     try:
         pages = client.collect_unit(unit, num_rows=num_rows, on_page=captured_pages.append)
         ledger.update(unit.key, "validating", page_count=len(pages))
-        raw_files = _write_raw_pages(output_dir, unit, pages, "raw")
-        summary = validate_pages(pages)
+        raw_files = _write_raw_pages(
+            output_dir, unit, pages, "raw", preserve_conflicts=True
+        )
+        allow_exact_duplicates = unit.endpoint == "results"
+        summary = validate_pages(
+            pages, allow_exact_duplicates=allow_exact_duplicates
+        )
         staged_relative = f"staged/{unit.staged_relative_path}"
-        rows = [row for page in pages for row in page.rows]
+        rows = unique_rows(pages) if allow_exact_duplicates else [
+            row for page in pages for row in page.rows
+        ]
         staged_bytes = b"".join(canonical_json(row) + b"\n" for row in rows)
         atomic_write_bytes(output_dir / staged_relative, staged_bytes)
         ledger.update(

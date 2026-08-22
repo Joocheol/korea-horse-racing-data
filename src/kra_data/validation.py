@@ -21,7 +21,9 @@ def _row_identity(row: dict[str, Any]) -> str:
     return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def validate_pages(pages: list[Page]) -> ValidationSummary:
+def validate_pages(
+    pages: list[Page], *, allow_exact_duplicates: bool = False
+) -> ValidationSummary:
     if not pages:
         raise ValidationError("no pages collected")
     total_count = pages[0].total_count
@@ -35,6 +37,19 @@ def validate_pages(pages: list[Page]) -> ValidationSummary:
         raise ValidationError(
             f"row count mismatch: totalCount={total_count}, received={len(rows)}"
         )
-    if duplicate_rows:
+    if duplicate_rows and not allow_exact_duplicates:
         raise ValidationError(f"unexplained duplicate rows: {duplicate_rows}")
     return ValidationSummary(total_count, len(rows), unique_rows, duplicate_rows, len(pages))
+
+
+def unique_rows(pages: list[Page]) -> list[dict[str, Any]]:
+    """Return rows in source order after removing only byte-equivalent JSON rows."""
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in pages:
+        for row in page.rows:
+            identity = _row_identity(row)
+            if identity not in seen:
+                seen.add(identity)
+                result.append(row)
+    return result
