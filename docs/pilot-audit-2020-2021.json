@@ -42,7 +42,7 @@
     },
     {
       "name": "kra-docs-2020-2021.tar.gz",
-      "size": 14691
+      "size": 14689
     },
     {
       "name": "kra-manifests-2020-2021.tar.gz",
@@ -50,7 +50,7 @@
     },
     {
       "name": "kra-normalized-2020-2021.tar.gz",
-      "size": 39808145
+      "size": 39813455
     },
     {
       "name": "kra-quarantine-2020-2021.tar.gz",
@@ -58,7 +58,7 @@
     },
     {
       "name": "kra-raw-2020-2021.tar.gz",
-      "size": 40900666
+      "size": 40900712
     },
     {
       "name": "source-artifact-2020-2021.json",
@@ -71,11 +71,6 @@
   ],
   "dropbox_step_outcome": "failure",
   "dropbox": {
-    "status": "missing_secrets",
-    "missing": [
-      "DROPBOX_APP_KEY",
-      "DROPBOX_APP_SECRET",
-      "DROPBOX_REFRESH_TOKEN"
-    ]
+    "status": "not_run"
   }
 }
