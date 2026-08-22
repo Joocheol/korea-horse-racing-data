@@ -1,3 +1,4 @@
+# retrigger via merge push 2026-08-23 08:00 KST
 name: Watch corrected research rebuild once
 
 on:
@@ -29,7 +30,7 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           python <<'PY'
-          import json, os, time, urllib.parse, urllib.request
+          import json, os, time, urllib.request
 
           token = os.environ['GH_TOKEN']
           repo = os.environ['REPOSITORY']
