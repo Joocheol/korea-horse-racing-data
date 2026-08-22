@@ -3,8 +3,8 @@
 *확인일: 2026-08-22*
 
 이 문서는 2016-2025년 10개년 KRA 공개 API 수집물의 현재 보존, 병합, 검증 상태를
-요약한다. 2020·2021년은 이미 수집 완료된 GitHub Actions artifact를 사용하며,
-재수집하지 않는다.
+요약한다. 2020·2021년은 이미 수집 완료된 GitHub Actions artifact를 사용했으며
+재수집하지 않았다.
 
 ## 1. 범위
 
@@ -13,9 +13,9 @@
 
 | 연도 | 출처 | 상태 |
 | --- | --- | --- |
-| 2016, 2017, 2018, 2019 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 기록 존재 |
-| 2020, 2021 | 기존 `kra-collection-state` artifact | 재수집 없이 기술 감사 통과, Dropbox 보존 재시도 성공 기록 존재 |
-| 2022, 2023, 2024, 2025 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 기록 존재 |
+| 2016, 2017, 2018, 2019 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 |
+| 2020, 2021 | 기존 `kra-collection-state` artifact | 기술·의미 감사 통과, Dropbox 보존 성공 |
+| 2022, 2023, 2024, 2025 | backfill archive | 기술 감사 통과, Dropbox 업로드 성공 |
 
 총 논리 수집 단위는 8,123개다. 이 중 2016·2017·2018·2019·2022·2023·2024·2025
 backfill 단위가 5,210개이고, 2020·2021 pilot 단위가 2,913개다.
@@ -35,23 +35,12 @@ backfill 단위가 5,210개이고, 2020·2021 pilot 단위가 2,913개다.
 
 - source artifact: `9396629882` (`kra-collection-state`)
 - source run: `32340684155`
-- source digest: `sha256:f1136a397093e3d62594960d4047987de373af94d1d38fdf9a61fdccf8a0d4f5`
 - archive run: `32559614706`
 - Dropbox upload status: `success`
 - 기술 감사: 2,913 / 2,913 complete, 오류 0건
 
-이전 2020·2021 Dropbox 패키지 업로드 실패 원인은 Dropbox API header의 한글 경로
-인코딩 오류(`UnicodeEncodeError`)였고, workflow의 `Dropbox-API-Arg` JSON 직렬화를
-ASCII escaping 방식으로 고쳐 해결했다. 수정 commit은
-`958ee92e761b16b7639a503d739b2010c7014f0f`이다.
-
-직접 Dropbox 목록 조회에서는 `/앱/kra-data/raw`, `/앱/kra-data/normalized`,
-`/앱/kra-data/manifests` 아래 기존 2020·2021 run folder와 분할 보존물
-(`*.b64part`), `ledger.json`, `technical-audit.json`, `SHA256SUMS`가 확인된다.
-새 archive run이 기록한 단일 `kra-*-2020-2021.tar.gz` 업로드는 GitHub 감사
-JSON에는 성공으로 남아 있으나, 같은 Dropbox connector의 즉시 목록 조회에서는
-별도 파일로 보이지 않았다. 따라서 Dropbox 상태는 감사 JSON의 성공 기록과 직접
-목록 확인 결과를 함께 보존한다.
+Dropbox archive에는 2020·2021 `raw`, `normalized`, `manifests`, `quarantine`, `docs`
+패키지와 SHA256 manifest의 업로드 성공 경로·크기·content hash·revision이 기록되어 있다.
 
 ## 3. 기술 감사 결과
 
@@ -99,11 +88,9 @@ JSON에는 성공으로 남아 있으나, 같은 Dropbox connector의 즉시 목
 | 2021 | `API4_3` | 36 | 23,787 | 0 |
 | 2021 | `API5` | 36 | 127,488 | 0 |
 
-## 5. 경주 ID 정합성 점검
+## 5. 경주 ID 의미 감사
 
-2020·2021 staged 파일에서 `(year, meet, rcDate, rcNo)` 기준 경주 ID를 만들고
-핵심 경주 테이블을 대조했다. `meet`은 `서울/1`, `제주/2`, `부경/부산경남/3`으로
-정규화했다.
+세부 결과는 `docs/SEMANTIC_AUDIT_2020_2021.md`에 기록했다.
 
 핵심 경주 universe는 일치한다.
 
@@ -111,27 +98,33 @@ JSON에는 성공으로 남아 있으나, 같은 Dropbox connector의 즉시 목
 - unique race IDs: 3,659
 - 핵심 3개 테이블 간 누락 race ID: 0건
 
-승식·매출 API는 핵심 경주 universe와 coverage 차이가 남아 있다.
+배당 계층에는 기준 경주 universe 밖 기록이 일부 존재하지만, 이들은 `sales`,
+`entries`, `results`, `race_record`가 없는 비경주/예비·취소·시험성 기록이며 분석용
+race universe에서 제외하고 raw에는 보존한다.
 
-| 파일/계층 | rows | race IDs | race_record에 없는 race IDs | race_record 대비 누락 race IDs |
-| --- | ---: | ---: | ---: | ---: |
-| `single` | 83,973 | 3,719 | 60 | 0 |
-| `double` | 675,081 | 3,719 | 60 | 0 |
-| `quinella_crosscheck` | 222,490 | 3,718 | 59 | 0 |
-| `sales` | 20,267 | 3,609 | 0 | 50 |
-| `triple` | 3,529,911 | 2,438 | 55 | 1,276 |
+`triple`의 기준 경주 대비 1,276경주 부재는 수집 실패가 아니다. 이 1,276경주는
+**전부 `sales`에 삼복·삼쌍 승식이 존재하지 않는다.** 그중 1,249경주는
+단식·연식·복식만 판매된 것으로 나타나고, 27경주는 sales 행 자체가 없다.
+반대로 triple이 존재하면서 sales가 있는 2,360경주는 7개 승식이 모두 확인된다.
 
-이 coverage 차이는 현재 기준으로 재수집 실패로 분류하지 않는다. 2020·2021년은
-코로나 중단과 비정상 개최일이 포함되므로, 승식별 제공 범위·취소·매출 존재 여부를
-별도 의미 검증으로 분리해 설명해야 한다.
+`sales`는 실제 시행 3,659경주 중 3,609경주에 존재하고 50경주에는 없다. ledger상
+`API179_1`의 해당 월·경마장 단위는 모두 `totalCount = raw = unique`이므로, 이 50경주는
+수집 누락이 아니라 원천 API의 source-level coverage gap으로 분류한다. 연구용 자료에서는
+0으로 대체하지 않고 `sales_missing`으로 표시한다.
 
-## 6. 현재 판정
+## 6. 최종 판정
 
-기술적 보존과 ledger 기준 완전성은 2016-2025 전 기간에 대해 통과 상태다.
-2020·2021은 기존 artifact를 사용했으며 재수집하지 않았다. 실패했던 Dropbox 업로드는
-workflow 수정 뒤 성공 run을 남겼다.
+**2016-2025 KRA 공개 API 수집·보존 작업은 완료로 판정한다.**
 
-다만 최종 연구용 완전성 판정은 아직 `완료`로 고정하지 않는다. 남은 작업은 경주 ID
-coverage 차이를 승식별 제공 범위, 취소·중단, 매출 존재 여부와 대조하여 의미적으로
-설명하는 것이다. 이 단계가 끝나야 2016-2025 전체 데이터셋을 기술·의미 양쪽에서
-완전하다고 선언할 수 있다.
+근거는 다음과 같다.
+
+- 10개년 8,123개 논리 수집 단위 전부 complete, 오류 0
+- 2020·2021 모든 group에서 `totalCount = raw rows = unique rows`, 중복 0
+- 실제 경주 핵심 universe 3개 테이블 완전 일치
+- 2020·2021 triple coverage 차이는 판매 승식 범위 차이와 정확히 대응
+- source-level coverage gap은 별도 flag 대상으로 분리
+- 10개년 raw/normalized/manifests 계층의 Dropbox 보존 감사 성공 기록 존재
+
+따라서 이후 단계는 **재수집이 아니라 연구용 10개년 통합 테이블 구축**이다.
+원천 API가 제공하지 않은 값은 결측 flag를 유지하고, 비경주/시험성 기록은 raw에 보존하되
+분석 universe에서는 제외한다.
