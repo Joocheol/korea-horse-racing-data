@@ -2,6 +2,14 @@
 
 한국 경마 공개데이터를 재현 가능하게 수집·검증·배포하기 위한 비공식 연구 프로젝트입니다.
 
+## 현재 상태
+
+2016-2025년 10개년 수집물은 ledger 기준 기술 감사와 보존 감사가 완료된 상태입니다.
+2020·2021년은 기존 수집 완료 artifact를 사용했으며 재수집하지 않습니다.
+
+현재 판정과 남은 의미 검증 항목은
+**[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)**에 기록합니다.
+
 ## 파일럿 범위
 
 2020·2021년, 서울·제주·부경의 다음 8개 공개 API를 수집합니다.
@@ -22,6 +30,7 @@
 - **[docs/API_FINDINGS.md](docs/API_FINDINGS.md)** — KRA 공개 API 조사 결과
 - **[docs/PILOT_2020_2021.md](docs/PILOT_2020_2021.md)** — 첫 수집 범위와 검증 방침
 - **[docs/COLLECTION_WORKFLOW.md](docs/COLLECTION_WORKFLOW.md)** — 실행 승인, 재개, 저장 계층과 종료 기준
+- **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 10개년 보존·검증 현황
 
 ## 개발·검증
 
