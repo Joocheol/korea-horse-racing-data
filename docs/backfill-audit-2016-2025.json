@@ -1,7 +1,7 @@
 {
   "archive_workflow": {
-    "run_id": 32552411643,
-    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32552411643"
+    "run_id": 32553067249,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32553067249"
   },
   "scope": {
     "years": [
@@ -185,7 +185,7 @@
     },
     {
       "name": "kra-docs-2016-2025.tar.gz",
-      "size": 18486
+      "size": 18825
     },
     {
       "name": "kra-manifests-2016.tar.gz",
@@ -193,7 +193,7 @@
     },
     {
       "name": "kra-manifests-2017.tar.gz",
-      "size": 52735
+      "size": 52733
     },
     {
       "name": "kra-manifests-2018.tar.gz",
@@ -201,55 +201,55 @@
     },
     {
       "name": "kra-manifests-2019.tar.gz",
-      "size": 52416
+      "size": 52418
     },
     {
       "name": "kra-manifests-2022.tar.gz",
-      "size": 52591
+      "size": 52584
     },
     {
       "name": "kra-manifests-2023.tar.gz",
-      "size": 52998
+      "size": 53015
     },
     {
       "name": "kra-manifests-2024.tar.gz",
-      "size": 52874
+      "size": 52870
     },
     {
       "name": "kra-manifests-2025.tar.gz",
-      "size": 53176
+      "size": 53175
     },
     {
       "name": "kra-normalized-2016.tar.gz",
-      "size": 23727906
+      "size": 23726936
     },
     {
       "name": "kra-normalized-2017.tar.gz",
-      "size": 29834146
+      "size": 29833314
     },
     {
       "name": "kra-normalized-2018.tar.gz",
-      "size": 29772934
+      "size": 29771808
     },
     {
       "name": "kra-normalized-2019.tar.gz",
-      "size": 30698382
+      "size": 30698221
     },
     {
       "name": "kra-normalized-2022.tar.gz",
-      "size": 27134096
+      "size": 27133386
     },
     {
       "name": "kra-normalized-2023.tar.gz",
-      "size": 27482907
+      "size": 27482280
     },
     {
       "name": "kra-normalized-2024.tar.gz",
-      "size": 26505145
+      "size": 26505120
     },
     {
       "name": "kra-normalized-2025.tar.gz",
-      "size": 27334446
+      "size": 27333410
     },
     {
       "name": "kra-quarantine-2016.tar.gz",
@@ -257,63 +257,63 @@
     },
     {
       "name": "kra-quarantine-2017.tar.gz",
-      "size": 246
-    },
-    {
-      "name": "kra-quarantine-2018.tar.gz",
       "size": 249
     },
     {
-      "name": "kra-quarantine-2019.tar.gz",
+      "name": "kra-quarantine-2018.tar.gz",
       "size": 247
     },
     {
+      "name": "kra-quarantine-2019.tar.gz",
+      "size": 246
+    },
+    {
       "name": "kra-quarantine-2022.tar.gz",
-      "size": 348559
+      "size": 348474
     },
     {
       "name": "kra-quarantine-2023.tar.gz",
-      "size": 11144
+      "size": 11119
     },
     {
       "name": "kra-quarantine-2024.tar.gz",
-      "size": 6004
+      "size": 5970
     },
     {
       "name": "kra-quarantine-2025.tar.gz",
-      "size": 433390
+      "size": 433371
     },
     {
       "name": "kra-raw-2016.tar.gz",
-      "size": 24449993
+      "size": 24449226
     },
     {
       "name": "kra-raw-2017.tar.gz",
-      "size": 30554145
+      "size": 30555880
     },
     {
       "name": "kra-raw-2018.tar.gz",
-      "size": 30487749
+      "size": 30486842
     },
     {
       "name": "kra-raw-2019.tar.gz",
-      "size": 31423534
+      "size": 31422000
     },
     {
       "name": "kra-raw-2022.tar.gz",
-      "size": 27783221
+      "size": 27784004
     },
     {
       "name": "kra-raw-2023.tar.gz",
-      "size": 28167427
+      "size": 28166060
     },
     {
       "name": "kra-raw-2024.tar.gz",
-      "size": 27180230
+      "size": 27179576
     },
     {
       "name": "kra-raw-2025.tar.gz",
-      "size": 28009654
+      "size": 28009376
     },
     {
       "name": "source-artifacts-2016-2025.json",
@@ -356,8 +356,318 @@
       "size": 1803
     }
   ],
-  "dropbox_step_outcome": "failure",
+  "dropbox_step_outcome": "success",
   "dropbox": {
-    "status": "not_run"
+    "status": "success",
+    "uploaded": [
+      {
+        "source": "packages/SHA256SUMS-2016-2025",
+        "destination": "/앱/kra-data/manifests/SHA256SUMS-2016-2025",
+        "size": 3936,
+        "content_hash": "8a0d78b3000dd49182b47f22f7611c64398e6221800ac190b4493de5a4627823",
+        "rev": "016599bc40bdbfc0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-docs-2016-2025.tar.gz",
+        "destination": "/앱/kra-data/docs/kra-docs-2016-2025.tar.gz",
+        "size": 18825,
+        "content_hash": "8e34d4fb64721310ddb1c1164971e687e23673b76663599897c2ff7dc760b4c1",
+        "rev": "016599bc4180dfc0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2016.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2016.tar.gz",
+        "size": 52228,
+        "content_hash": "f777cca558b3a868788c8569bbe1c467bd0ec3474d92a89598636a6e6a595158",
+        "rev": "016599bc4229c6e0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2017.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2017.tar.gz",
+        "size": 52733,
+        "content_hash": "777c7418b8a2a6aa51f225910a91957aa6aace98d2c3a760675ce312725cc28f",
+        "rev": "016599bc430df5d0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2018.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2018.tar.gz",
+        "size": 52768,
+        "content_hash": "3f60df9ba2fe08b985a8a1e24c015340e8a3719609448b0ddd428c87d4a72240",
+        "rev": "016599bc43c21ee0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2019.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2019.tar.gz",
+        "size": 52418,
+        "content_hash": "6cea32a93ee2a045008a62c3849bc36c057ca42889b85936eed1fe8102da930a",
+        "rev": "016599bc44af5cf0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2022.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2022.tar.gz",
+        "size": 52584,
+        "content_hash": "ff5a31a47579915a48c40dd73b12ab07245265f17c92cdcdbb3bdf77d98d6fdc",
+        "rev": "016599bc45492530000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2023.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2023.tar.gz",
+        "size": 53015,
+        "content_hash": "0ca20b70248f83dca0c6f2d5259ef712ffd690d734b1c65e4c6d27d3945cc71f",
+        "rev": "016599bc45f5c760000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2024.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2024.tar.gz",
+        "size": 52870,
+        "content_hash": "ed571c680ae07ced68f213f8d0e4532e6264d923fc1107a0d9525301395d63a8",
+        "rev": "016599bc4692c380000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2025.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2025.tar.gz",
+        "size": 53175,
+        "content_hash": "ba2d12193f2f9accec9becc6e88787df969a880617b95372c8ac4b1b98a91313",
+        "rev": "016599bc473f98b0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2016.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2016.tar.gz",
+        "size": 23726936,
+        "content_hash": "6bfe3e3d12c1262dd86e91914376e53aecf23050a2605c43761b174020368912",
+        "rev": "016599bc489e6c50000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2017.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2017.tar.gz",
+        "size": 29833314,
+        "content_hash": "3485bab878c17267be81ad2ef8e166601f02c7f1179d7b485833296e47a2b66a",
+        "rev": "016599bc4a52d960000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2018.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2018.tar.gz",
+        "size": 29771808,
+        "content_hash": "cf6d03e38e38db0b4034f48604edd962f91f02105da88cc688a06002c8f8fae9",
+        "rev": "016599bc4bd6e8e0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2019.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2019.tar.gz",
+        "size": 30698221,
+        "content_hash": "7e6d69360e304ddccf3b5f0963aa03fe7be0e7fde5239401da14ab1dc6a803d2",
+        "rev": "016599bc4d8915d0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2022.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2022.tar.gz",
+        "size": 27133386,
+        "content_hash": "4718b6730bdbfa724ca9b6a8768cd979b5caa0eedbcdf55797e017dcde0660ed",
+        "rev": "016599bc4f83f6d0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2023.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2023.tar.gz",
+        "size": 27482280,
+        "content_hash": "5dc8ad434baf3db228c49c6fc3ed9cf30a9143faf28e20e36d974924f99a1a11",
+        "rev": "016599bc51195f20000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2024.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2024.tar.gz",
+        "size": 26505120,
+        "content_hash": "f1082f6f5c063c59e5252a0497d603f3fc15096b8869de0b9a9ddbe80796bed4",
+        "rev": "016599bc53c51ac0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2025.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2025.tar.gz",
+        "size": 27333410,
+        "content_hash": "18bbd8354859e1173bac7ad10de5d84f6ce1b74b6425d7c2d1287a332944db4a",
+        "rev": "016599bc551d31e0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2016.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2016.tar.gz",
+        "size": 248,
+        "content_hash": "fe39293d17629a5125d871ee98964b6cb995794313c1eb52629f8cce18ffaf74",
+        "rev": "016599bc55cb8940000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2017.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2017.tar.gz",
+        "size": 249,
+        "content_hash": "6ef4a7d5b5a1cf62894d96fe9e70ae87398f44771f52c9beaf93afcdf50f8ab7",
+        "rev": "016599bc567eeb30000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2018.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2018.tar.gz",
+        "size": 247,
+        "content_hash": "40ae4441ed9be56a5449e05bdd91aa05456b09ab54ca947789bf866eeb1bab9d",
+        "rev": "016599bc572f8b90000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2019.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2019.tar.gz",
+        "size": 246,
+        "content_hash": "22897c731f9708614ec983a4498cabbb07afca6e69f5ef7e679afab655776dc9",
+        "rev": "016599bc57e0dcf0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2022.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2022.tar.gz",
+        "size": 348474,
+        "content_hash": "b5684a846fcb9fcf47f560cb7f7913da814013dbdca86fd20c8a82bb8ef0ca42",
+        "rev": "016599bc58b68190000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2023.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2023.tar.gz",
+        "size": 11119,
+        "content_hash": "ced48b09ab1e6baf68940d2014df0fa20cf897540352947c0178408d9f5ca66e",
+        "rev": "016599bc59d1d860000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2024.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2024.tar.gz",
+        "size": 5970,
+        "content_hash": "2bfebfd4d826b6d7e288283177787876d4110eb55adab3285f8ce49fb24f873b",
+        "rev": "016599bc5a7e51f0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2025.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2025.tar.gz",
+        "size": 433371,
+        "content_hash": "f95cb3059288e3a2168b2adbd712f7719a57453fdf7318351b61c25c29b5b0ca",
+        "rev": "016599bc5b651720000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2016.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2016.tar.gz",
+        "size": 24449226,
+        "content_hash": "1fd63b9256400685e3470bfe19e0f15c7c5c6b51092b7b082bf21bee098fe76a",
+        "rev": "016599bc5cb74850000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2017.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2017.tar.gz",
+        "size": 30555880,
+        "content_hash": "780406ef73744e8bf035b409a5c2fc123a382fdb5c9f969034f9ae88227ee099",
+        "rev": "016599bc5e409880000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2018.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2018.tar.gz",
+        "size": 30486842,
+        "content_hash": "be3e63d9dd186572941f518b6db8bf4f2729787d015ba4377e793becd28f87e1",
+        "rev": "016599bc5faf95f0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2019.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2019.tar.gz",
+        "size": 31422000,
+        "content_hash": "dbf115d976970c5092d11ff14d3667b69b22620648fdd94eb5e1dea9b27870de",
+        "rev": "016599bc612ac3c0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2022.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2022.tar.gz",
+        "size": 27784004,
+        "content_hash": "e98135f7504897d762eb9d826476a819d767a79841050883dbc977ab837869bd",
+        "rev": "016599bc62ca9830000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2023.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2023.tar.gz",
+        "size": 28166060,
+        "content_hash": "26d96e818b531dd413c4643da8e3ef21bab37ed8ff3cdfaddc898567088c8dd6",
+        "rev": "016599bc64350440000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2024.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2024.tar.gz",
+        "size": 27179576,
+        "content_hash": "b2d9f86ac446b831eb9eb40e38d2d6ae7cfb3fc6f2603a8b9ded5f8df0cc933b",
+        "rev": "016599bc65d52b20000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-raw-2025.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2025.tar.gz",
+        "size": 28009376,
+        "content_hash": "3fdfbd9cce1e42f5c481b456264f1bc173c799a1f912fafe2e4257570f0083aa",
+        "rev": "016599bc67579010000000379cbd7c3"
+      },
+      {
+        "source": "packages/source-artifacts-2016-2025.json",
+        "destination": "/앱/kra-data/manifests/source-artifacts-2016-2025.json",
+        "size": 2483,
+        "content_hash": "02d3e0f21549968736eecc8979e2c0100c5aac12854de3a1e9c18dd548fd87e8",
+        "rev": "016599bc68040520000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2016.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2016.json",
+        "size": 156,
+        "content_hash": "2e78baffb52504ee520455bd772e1d13ab09e7c83b31273d73282f61742c99a6",
+        "rev": "016599bc68a123d0000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2017.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2017.json",
+        "size": 156,
+        "content_hash": "cf1616476acc8e319b85d65b9840534c9f1a9421eff3a25488553fd108018866",
+        "rev": "016599bc69517730000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2018.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2018.json",
+        "size": 156,
+        "content_hash": "cf1616476acc8e319b85d65b9840534c9f1a9421eff3a25488553fd108018866",
+        "rev": "016599bc69f017f0000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2019.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2019.json",
+        "size": 156,
+        "content_hash": "cf1616476acc8e319b85d65b9840534c9f1a9421eff3a25488553fd108018866",
+        "rev": "016599bc6a9d2310000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2022.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2022.json",
+        "size": 156,
+        "content_hash": "cf1616476acc8e319b85d65b9840534c9f1a9421eff3a25488553fd108018866",
+        "rev": "016599bc6b3a4420000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2023.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2023.json",
+        "size": 156,
+        "content_hash": "65afacd2fc86fdbcb7932bfc2d6747895da161524445d1797c553db4cb221678",
+        "rev": "016599bc6be34290000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2024.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2024.json",
+        "size": 156,
+        "content_hash": "60618bef0d4d02953db3c2ed6ca38b5c2e6b5b3dcd44299a36fdf9c2bbac839b",
+        "rev": "016599bc6ca360d0000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2025.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2025.json",
+        "size": 156,
+        "content_hash": "60618bef0d4d02953db3c2ed6ca38b5c2e6b5b3dcd44299a36fdf9c2bbac839b",
+        "rev": "016599bc6d58b8b0000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audits-2016-2025.json",
+        "destination": "/앱/kra-data/manifests/technical-audits-2016-2025.json",
+        "size": 1803,
+        "content_hash": "890d13b8a685ed50658d016ecf53ceb0603aa0eac9ed9d27dd19e108fd11af0b",
+        "rev": "016599bc6e058fe0000000379cbd7c3"
+      }
+    ]
   }
 }
