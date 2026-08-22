@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
       - name: Run fixture tests
         run: python -m unittest discover -s tests -v
-      - name: Verify eight-service pilot preflight
+      - name: Verify production monthly preflight
         run: >-
           python -m kra_data.preflight --start-year 2020 --end-year 2021
           --meets 1,2,3
