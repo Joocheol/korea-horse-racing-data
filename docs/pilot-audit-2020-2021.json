@@ -1,7 +1,7 @@
 {
   "archive_workflow": {
-    "run_id": 32345333716,
-    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32345333716"
+    "run_id": 32559614706,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32559614706"
   },
   "scope": {
     "years": [
@@ -28,12 +28,14 @@
   },
   "technical_audit": {
     "audited_complete_units": 2913,
+    "endpoint_filter": null,
     "errors": [],
     "ledger_units": 2913,
     "passed": true,
     "state_counts": {
       "complete": 2913
-    }
+    },
+    "total_ledger_units": 2913
   },
   "packages": [
     {
@@ -42,23 +44,23 @@
     },
     {
       "name": "kra-docs-2020-2021.tar.gz",
-      "size": 14689
+      "size": 22688
     },
     {
       "name": "kra-manifests-2020-2021.tar.gz",
-      "size": 135796
+      "size": 135815
     },
     {
       "name": "kra-normalized-2020-2021.tar.gz",
-      "size": 39813455
+      "size": 39809282
     },
     {
       "name": "kra-quarantine-2020-2021.tar.gz",
-      "size": 216
+      "size": 217
     },
     {
       "name": "kra-raw-2020-2021.tar.gz",
-      "size": 40900712
+      "size": 40903519
     },
     {
       "name": "source-artifact-2020-2021.json",
@@ -66,11 +68,69 @@
     },
     {
       "name": "technical-audit-2020-2021.json",
-      "size": 111
+      "size": 160
     }
   ],
-  "dropbox_step_outcome": "failure",
+  "dropbox_step_outcome": "success",
   "dropbox": {
-    "status": "not_run"
+    "status": "success",
+    "uploaded": [
+      {
+        "source": "packages/kra-raw-2020-2021.tar.gz",
+        "destination": "/앱/kra-data/raw/kra-raw-2020-2021.tar.gz",
+        "size": 40903519,
+        "content_hash": "c82fd02938f86a37f9e5b2543d48dc975d9752de9627516706ef094b24b4553e",
+        "rev": "016599db1d07c3c0000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-normalized-2020-2021.tar.gz",
+        "destination": "/앱/kra-data/normalized/kra-normalized-2020-2021.tar.gz",
+        "size": 39809282,
+        "content_hash": "c78ab7809c75d0d1997056e54cdfbaf024bad61e6a82788340423b6961cc7d5e",
+        "rev": "016599db1f0ad430000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-manifests-2020-2021.tar.gz",
+        "destination": "/앱/kra-data/manifests/kra-manifests-2020-2021.tar.gz",
+        "size": 135815,
+        "content_hash": "24dc585068cbad0bd367a4d03f70d3750cf5cb42e72ef34fe325cca99ed87655",
+        "rev": "016599db2000b830000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-quarantine-2020-2021.tar.gz",
+        "destination": "/앱/kra-data/quarantine/kra-quarantine-2020-2021.tar.gz",
+        "size": 217,
+        "content_hash": "f6350f46337134cffa9e8486ca4452344101eae46eab2ebef66b4aa349814c9d",
+        "rev": "016599db20f59590000000379cbd7c3"
+      },
+      {
+        "source": "packages/kra-docs-2020-2021.tar.gz",
+        "destination": "/앱/kra-data/docs/kra-docs-2020-2021.tar.gz",
+        "size": 22688,
+        "content_hash": "bca68a819ab31ed848210be11f881486fd3c9891af90931927b6a569802f466e",
+        "rev": "016599db21e28b10000000379cbd7c3"
+      },
+      {
+        "source": "packages/technical-audit-2020-2021.json",
+        "destination": "/앱/kra-data/manifests/technical-audit-2020-2021.json",
+        "size": 160,
+        "content_hash": "9e19d468e2498b67a7cb3a78f9e0bd7e29d0acda099094da2bcb07ae3691181a",
+        "rev": "016599db23091f40000000379cbd7c3"
+      },
+      {
+        "source": "packages/source-artifact-2020-2021.json",
+        "destination": "/앱/kra-data/manifests/source-artifact-2020-2021.json",
+        "size": 501,
+        "content_hash": "05c06e7424636627f1dcf3203f143eafefe0d2f1688865407e2ba917182966c2",
+        "rev": "016599db24177f20000000379cbd7c3"
+      },
+      {
+        "source": "packages/SHA256SUMS",
+        "destination": "/앱/kra-data/manifests/SHA256SUMS",
+        "size": 670,
+        "content_hash": "030083a8ea28122ad102f2075c0b186886ed14bb3f2ca8cbda98d12760c6dd27",
+        "rev": "016599db252d0090000000379cbd7c3"
+      }
+    ]
   }
 }
