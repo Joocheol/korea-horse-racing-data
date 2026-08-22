@@ -1,0 +1,461 @@
+name: Archive audited KRA backfill to Dropbox once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/archive-backfill-to-dropbox-once.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: kra-backfill-dropbox-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTHONPATH: src
+      SOURCE_RUN_ID: "32544887677"
+      SOURCE_HEAD_SHA: "99d912bd1f7311ebf5087392e6bc83ae0b77ba35"
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Verify successful source run and artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          import pathlib
+          import urllib.request
+
+          repository = os.environ["GH_REPOSITORY"]
+          run_id = int(os.environ["SOURCE_RUN_ID"])
+          expected_sha = os.environ["SOURCE_HEAD_SHA"]
+          token = os.environ["GH_TOKEN"]
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "kra-backfill-archiver",
+          }
+
+          def get_json(url):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          run = get_json(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}")
+          assert run["status"] == "completed", run
+          assert run["conclusion"] == "success", run
+          assert run["head_sha"] == expected_sha, run
+
+          listing = get_json(
+              f"https://api.github.com/repos/{repository}/actions/runs/{run_id}/artifacts"
+              "?per_page=100"
+          )
+          by_name = {
+              item["name"]: item
+              for item in listing.get("artifacts", [])
+              if not item.get("expired")
+          }
+          years = (2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025)
+          missing = [year for year in years if f"kra-backfill-{year}" not in by_name]
+          assert not missing, f"missing source artifacts: {missing}"
+
+          pathlib.Path("work").mkdir()
+          selection = {
+              "workflow_run_id": run_id,
+              "workflow_run_url": run["html_url"],
+              "workflow_run_conclusion": run["conclusion"],
+              "workflow_head_sha": run["head_sha"],
+              "artifacts": [
+                  {
+                      "year": year,
+                      "artifact_id": by_name[f"kra-backfill-{year}"]["id"],
+                      "artifact_name": f"kra-backfill-{year}",
+                      "created_at": by_name[f"kra-backfill-{year}"]["created_at"],
+                      "size_in_bytes": by_name[f"kra-backfill-{year}"]["size_in_bytes"],
+                      "digest": by_name[f"kra-backfill-{year}"].get("digest"),
+                  }
+                  for year in years
+              ],
+          }
+          pathlib.Path("work/source-artifacts-2016-2025.json").write_text(
+              json.dumps(selection, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(selection, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Restore successful yearly artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: kra-backfill-*
+          path: restored
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Recompute all technical audits
+        run: |
+          python <<'PY'
+          import json
+          import pathlib
+          import subprocess
+
+          expected = {
+              2016: 653,
+              2017: 648,
+              2018: 648,
+              2019: 648,
+              2022: 648,
+              2023: 657,
+              2024: 654,
+              2025: 654,
+          }
+          reports = {}
+          for year, units in expected.items():
+              output = pathlib.Path("restored") / f"kra-backfill-{year}" / "output"
+              subprocess.run(
+                  ["python", "-m", "kra_data.audit", "--output", str(output)],
+                  check=True,
+              )
+              report = json.loads(
+                  (output / "quality" / "technical-audit.json").read_text(encoding="utf-8")
+              )
+              assert report["passed"] is True, (year, report)
+              assert report["ledger_units"] == units, (year, report)
+              assert report["audited_complete_units"] == units, (year, report)
+              assert report["state_counts"] == {"complete": units}, (year, report)
+              assert report["errors"] == [], (year, report)
+              reports[str(year)] = report
+              print(f"Technical gate passed: {year} {units}/{units}")
+
+          pathlib.Path("work/technical-audits-2016-2025.json").write_text(
+              json.dumps(reports, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Package immutable Dropbox layers
+        run: |
+          python <<'PY'
+          import hashlib
+          import pathlib
+          import tarfile
+
+          years = (2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025)
+          packages = pathlib.Path("packages")
+          packages.mkdir()
+
+          def archive(destination, root, members):
+              with tarfile.open(destination, "w:gz") as tar:
+                  added = False
+                  for member in members:
+                      source = root / member
+                      if source.exists():
+                          tar.add(source, arcname=member)
+                          added = True
+                  if not added:
+                      marker = pathlib.Path("work") / "EMPTY.txt"
+                      marker.write_text("No files were present for this layer.\n", encoding="utf-8")
+                      tar.add(marker, arcname="EMPTY.txt")
+
+          for year in years:
+              output = pathlib.Path("restored") / f"kra-backfill-{year}" / "output"
+              archive(
+                  packages / f"kra-raw-{year}.tar.gz",
+                  output,
+                  ("raw", "raw-revisions"),
+              )
+              archive(
+                  packages / f"kra-normalized-{year}.tar.gz",
+                  output,
+                  ("staged",),
+              )
+              archive(
+                  packages / f"kra-manifests-{year}.tar.gz",
+                  output,
+                  ("ledger.json", "quality"),
+              )
+              archive(
+                  packages / f"kra-quarantine-{year}.tar.gz",
+                  output,
+                  ("failures",),
+              )
+              audit = output / "quality" / "technical-audit.json"
+              (packages / f"technical-audit-{year}.json").write_bytes(audit.read_bytes())
+
+          archive(
+              packages / "kra-docs-2016-2025.tar.gz",
+              pathlib.Path("."),
+              ("README.md", "docs"),
+          )
+          (packages / "source-artifacts-2016-2025.json").write_bytes(
+              pathlib.Path("work/source-artifacts-2016-2025.json").read_bytes()
+          )
+          (packages / "technical-audits-2016-2025.json").write_bytes(
+              pathlib.Path("work/technical-audits-2016-2025.json").read_bytes()
+          )
+
+          lines = []
+          for path in sorted(packages.iterdir()):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {path.name}")
+          (packages / "SHA256SUMS-2016-2025").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Preserve Dropbox-ready packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-dropbox-packages-2016-2025
+          path: packages
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Upload audited packages to Dropbox
+        id: dropbox
+        continue-on-error: true
+        run: |
+          python <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import urllib.parse
+          import urllib.request
+
+          required = ("DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "DROPBOX_REFRESH_TOKEN")
+          missing = [name for name in required if not os.environ.get(name)]
+          status_path = pathlib.Path("work/dropbox-status-2016-2025.json")
+          if missing:
+              status_path.write_text(
+                  json.dumps({"status": "missing_secrets", "missing": missing}, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+              raise SystemExit("Dropbox repository secrets are missing: " + ", ".join(missing))
+
+          credentials = base64.b64encode(
+              f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()
+          ).decode()
+          request = urllib.request.Request(
+              "https://api.dropboxapi.com/oauth2/token",
+              data=urllib.parse.urlencode({
+                  "grant_type": "refresh_token",
+                  "refresh_token": os.environ["DROPBOX_REFRESH_TOKEN"],
+              }).encode(),
+              headers={"Authorization": f"Basic {credentials}"},
+          )
+          with urllib.request.urlopen(request) as response:
+              access_token = json.load(response)["access_token"]
+          auth = {"Authorization": f"Bearer {access_token}"}
+
+          def api(url, data, headers):
+              request = urllib.request.Request(url, data=data, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          def commit(path):
+              return {"path": path, "mode": "add", "autorename": False, "mute": True}
+
+          def upload(source, destination):
+              size = source.stat().st_size
+              chunk_size = 8 * 1024 * 1024
+              if size <= 140 * 1024 * 1024:
+                  return api(
+                      "https://content.dropboxapi.com/2/files/upload",
+                      source.read_bytes(),
+                      {
+                          **auth,
+                          "Content-Type": "application/octet-stream",
+                          "Dropbox-API-Arg": json.dumps(commit(destination), ensure_ascii=False),
+                      },
+                  )
+              with source.open("rb") as handle:
+                  first = handle.read(chunk_size)
+                  started = api(
+                      "https://content.dropboxapi.com/2/files/upload_session/start",
+                      first,
+                      {
+                          **auth,
+                          "Content-Type": "application/octet-stream",
+                          "Dropbox-API-Arg": json.dumps({"close": False}),
+                      },
+                  )
+                  session_id = started["session_id"]
+                  offset = len(first)
+                  while offset < size:
+                      chunk = handle.read(chunk_size)
+                      finishing = offset + len(chunk) == size
+                      endpoint = "finish" if finishing else "append_v2"
+                      argument = {"cursor": {"session_id": session_id, "offset": offset}}
+                      if finishing:
+                          argument["commit"] = commit(destination)
+                      else:
+                          argument["close"] = False
+                      result = api(
+                          f"https://content.dropboxapi.com/2/files/upload_session/{endpoint}",
+                          chunk,
+                          {
+                              **auth,
+                              "Content-Type": "application/octet-stream",
+                              "Dropbox-API-Arg": json.dumps(argument, ensure_ascii=False),
+                          },
+                      )
+                      offset += len(chunk)
+                  return result
+
+          base = "/앱/kra-data"
+          destinations = {}
+          for source in sorted(pathlib.Path("packages").iterdir()):
+              name = source.name
+              if name.startswith("kra-raw-"):
+                  layer = "raw"
+              elif name.startswith("kra-normalized-"):
+                  layer = "normalized"
+              elif name.startswith("kra-quarantine-"):
+                  layer = "quarantine"
+              elif name.startswith("kra-docs-"):
+                  layer = "docs"
+              else:
+                  layer = "manifests"
+              destinations[source] = f"{base}/{layer}/{name}"
+
+          uploaded = []
+          for source, destination in destinations.items():
+              result = upload(source, destination)
+              uploaded.append({
+                  "source": str(source),
+                  "destination": result.get("path_display", destination),
+                  "size": result.get("size", source.stat().st_size),
+                  "content_hash": result.get("content_hash"),
+                  "rev": result.get("rev"),
+              })
+              print(f"Uploaded {source.name} -> {uploaded[-1]['destination']}")
+
+          status_path.write_text(
+              json.dumps({"status": "success", "uploaded": uploaded}, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Publish durable archive evidence
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          ARCHIVE_RUN_ID: ${{ github.run_id }}
+          ARCHIVE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DROPBOX_OUTCOME: ${{ steps.dropbox.outcome }}
+        run: |
+          python <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import urllib.error
+          import urllib.request
+
+          def read_json(path, fallback):
+              file = pathlib.Path(path)
+              return json.loads(file.read_text(encoding="utf-8")) if file.exists() else fallback
+
+          packages = [
+              {"name": path.name, "size": path.stat().st_size}
+              for path in sorted(pathlib.Path("packages").glob("*"))
+          ] if pathlib.Path("packages").exists() else []
+          evidence = {
+              "archive_workflow": {
+                  "run_id": int(os.environ["ARCHIVE_RUN_ID"]),
+                  "run_url": os.environ["ARCHIVE_RUN_URL"],
+              },
+              "scope": {
+                  "years": [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025],
+                  "api227_units": 2330,
+              },
+              "source": read_json(
+                  "work/source-artifacts-2016-2025.json",
+                  {"status": "selection_unavailable"},
+              ),
+              "technical_audits": read_json(
+                  "work/technical-audits-2016-2025.json",
+                  {"status": "audit_unavailable"},
+              ),
+              "packages": packages,
+              "dropbox_step_outcome": os.environ.get("DROPBOX_OUTCOME", "unknown"),
+              "dropbox": read_json(
+                  "work/dropbox-status-2016-2025.json",
+                  {"status": "not_run"},
+              ),
+          }
+          payload = (json.dumps(evidence, ensure_ascii=False, indent=2) + "\n").encode()
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          path = "docs/backfill-audit-2016-2025.json"
+          url = f"https://api.github.com/repos/{repository}/contents/{path}"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+              "User-Agent": "kra-backfill-archiver",
+          }
+          body = {
+              "message": "Record audited 2016-2025 backfill archive evidence",
+              "content": base64.b64encode(payload).decode(),
+              "branch": "main",
+          }
+          try:
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
+                  body["sha"] = json.load(response)["sha"]
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(body).encode(),
+              headers=headers,
+              method="PUT",
+          )
+          with urllib.request.urlopen(request) as response:
+              result = json.load(response)
+          print(result["content"]["html_url"])
+          PY
+
+      - name: Require Dropbox completion
+        if: ${{ always() }}
+        run: |
+          python <<'PY'
+          import json
+          import pathlib
+
+          path = pathlib.Path("work/dropbox-status-2016-2025.json")
+          status = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"status": "not_run"}
+          if status.get("status") != "success":
+              raise SystemExit(
+                  "Dropbox archive did not complete: "
+                  + json.dumps(status, ensure_ascii=False)
+              )
+          print("Dropbox archive completed and recorded.")
+          PY
