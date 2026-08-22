@@ -1,6 +1,6 @@
 # API 형식·호출량·Dropbox 경로 결정
 
-*확정 2026-08-21*
+*확정 2026-08-21, normalized 계층 규칙 보강 2026-08-23*
 
 ## 1. 대상 API와 원본 형식
 
@@ -77,3 +77,22 @@ ID를 키로 사용한다.
   quarantine/
   docs/
 ```
+
+## 4. raw / normalized / research 경계
+
+`normalized`는 코드 내부의 `staged/`와 같은 논리 계층이다. 여기서 수행하는 정규화는
+**구조적 정규화(structural normalization)**에 한정한다.
+
+- raw: API 응답 원본 바이트를 그대로 보존한다.
+- normalized/staged: JSON 또는 XML의 각 source item을 JSONL 한 행으로 만든다.
+- research: 여러 API를 `race_id`로 연결하고 `meet`, `pool_code` 등을 의미적으로 통일한다.
+
+normalized에서는 source field 이름과 source-native 자료형을 보존한다. 따라서 XML API의
+숫자형 값이 문자열인 경우 이를 숫자로 강제 변환하지 않는다. `race_id` 추가, 승식 코드 통일,
+연구 race universe 필터, 결측 0 대체도 normalized에서는 하지 않는다.
+
+`API5`의 복승 자료는 `API29_1` QNL과 중복되더라도 validation evidence로 raw/normalized에
+유지한다. canonical research odds에는 `API29_1` QNL만 사용한다.
+
+실제 artifact 감사 결과와 재현 명령은 [NORMALIZED_LAYER_AUDIT.md](NORMALIZED_LAYER_AUDIT.md)에
+정리한다.

@@ -30,6 +30,20 @@
 - sales가 없는 50경주는 ledger 완전성 검사를 통과했으므로 source-level coverage gap으로 분류
 - 원천 API가 제공하지 않은 값은 0으로 대체하지 않고 결측으로 유지
 
+### normalized/staged 계층 감사
+
+`normalized`는 코드 내부 `staged/`와 같은 논리 계층이며 source item을 JSONL 행으로 구조화한 archival staging으로 확정했다. 의미·자료형 통일은 `research`에서 수행한다.
+
+실제 artifact 감사 결과:
+
+- 2020-2021 artifact `9396629882`: staged 2,913개, 총 4,656,969행, 파일 내부 완전 중복 0
+- legacy API227 달력 전수 방식 때문에 빈 staged 파일 1,797개가 존재하나 현재 운영 planner에서는 발생하지 않음
+- 2025 artifact `9468442238`: staged 654개, 총 3,280,645행, 빈 파일 0, 파일 내부 완전 중복 0
+- API29 QNL과 API5 복승 교차검증: 2020-2021 222,490행 및 2025 123,078행 모두 키 누락 0, 배당 불일치 0
+- API5는 validation evidence로 raw/normalized에 유지하되 canonical `research/odds`에는 포함하지 않음
+
+재현 가능한 감사 코드와 전체 판정은 `docs/NORMALIZED_LAYER_AUDIT.md` 및 `src/kra_data/normalized_audit.py`에 유지한다.
+
 ## 3. 통합 연구용 데이터셋
 
 공통 키는 `race_id = YYYYMMDD-meet-rcNo`이다. `race_record`를 연구용 race universe로 사용한다.

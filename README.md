@@ -8,6 +8,7 @@
 
 - 총 8,123개 논리 수집 단위 기술 감사 완료, 오류 0
 - 2020·2021 기존 수집 artifact 재사용 및 의미 감사 완료
+- normalized/staged 계층 역할·중복·schema 감사 완료
 - 통합 연구용 race universe: 24,436경주
 - 통합 odds: 29,192,211행
 - `race_id` 중복: 0
@@ -27,6 +28,7 @@
 - raw 응답은 페이지별 원본 바이트를 보존합니다.
 - `API227`은 `API4_3`에서 발견한 실제 경주일만 호출합니다.
 - 비경주·예비·취소·시험성 기록은 raw에는 보존하되 연구용 race universe에서는 제외합니다.
+- normalized/staged는 source item을 JSONL로 구조화하는 계층이며 의미·자료형 통일은 research에서 수행합니다.
 
 ## Dropbox
 
@@ -37,6 +39,7 @@ canonical Dropbox는 GitHub Actions repository secrets의
 ## 문서
 
 - **[docs/CURRENT_STATUS_2016_2025.md](docs/CURRENT_STATUS_2016_2025.md)** — 최종 수집·통합·Dropbox 보존 상태
+- **[docs/NORMALIZED_LAYER_AUDIT.md](docs/NORMALIZED_LAYER_AUDIT.md)** — normalized/staged 계층의 역할, 실제 artifact 감사, 중복·schema 판정
 - **[docs/API_FINDINGS.md](docs/API_FINDINGS.md)** — KRA 공개 API 조사 결과
 - **[docs/COLLECTION_FORMATS.md](docs/COLLECTION_FORMATS.md)** — API 형식·호출량·저장 규칙
 - **[docs/COLLECTION_WORKFLOW.md](docs/COLLECTION_WORKFLOW.md)** — 재수집·증분수집 시 운영 규칙
@@ -49,6 +52,7 @@ canonical Dropbox는 GitHub Actions repository secrets의
 PYTHONPATH=src python -m unittest discover -s tests -v
 PYTHONPATH=src python -m kra_data.preflight \
   --start-year 2020 --end-year 2021 --meets 1,2,3
+PYTHONPATH=src python -m kra_data.normalized_audit <collection-artifact.zip>
 ```
 
 운영 workflow는 `collect.yml`, `probe.yml`, `ci.yml`만 유지합니다.
