@@ -1,0 +1,368 @@
+{
+  "archive_workflow": {
+    "run_id": 32549674197,
+    "run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32549674197"
+  },
+  "scope": {
+    "years": [
+      2016,
+      2017,
+      2018,
+      2019,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "api227_units": 2330
+  },
+  "source": {
+    "workflow_run_id": 32544887677,
+    "workflow_run_url": "https://github.com/Joocheol/korea-horse-racing-data/actions/runs/32544887677",
+    "workflow_run_conclusion": "success",
+    "workflow_head_sha": "99d912bd1f7311ebf5087392e6bc83ae0b77ba35",
+    "artifacts": [
+      {
+        "year": 2016,
+        "artifact_id": 9468333985,
+        "artifact_name": "kra-backfill-2016",
+        "created_at": "2026-08-22T02:08:05Z",
+        "size_in_bytes": 52522118,
+        "digest": "sha256:80f253916391d1efaeed30165105b6b164fdffea80ca28970f1fa93ebefd6c63"
+      },
+      {
+        "year": 2017,
+        "artifact_id": 9468349240,
+        "artifact_name": "kra-backfill-2017",
+        "created_at": "2026-08-22T02:09:11Z",
+        "size_in_bytes": 65919511,
+        "digest": "sha256:4bea66884d2b112f9adc924dac1f8cfe093484c264ef7b3413bc45d24867d563"
+      },
+      {
+        "year": 2018,
+        "artifact_id": 9468367145,
+        "artifact_name": "kra-backfill-2018",
+        "created_at": "2026-08-22T02:10:30Z",
+        "size_in_bytes": 65798847,
+        "digest": "sha256:586a4170138bf34555d776d1d9cbee2011065a6140fee2462afb2ff70c5dadb8"
+      },
+      {
+        "year": 2019,
+        "artifact_id": 9468381558,
+        "artifact_name": "kra-backfill-2019",
+        "created_at": "2026-08-22T02:11:35Z",
+        "size_in_bytes": 67809859,
+        "digest": "sha256:dc3e9a82f0b39003060b668a55f5c95702c9675ec236b037dd9acf6f3c8431ec"
+      },
+      {
+        "year": 2022,
+        "artifact_id": 9468397400,
+        "artifact_name": "kra-backfill-2022",
+        "created_at": "2026-08-22T02:12:48Z",
+        "size_in_bytes": 60383885,
+        "digest": "sha256:8945a2c6f5035b03e08f372a6a6a04a4cd766439d8a6691bda481f8ea414e9fe"
+      },
+      {
+        "year": 2023,
+        "artifact_id": 9468412690,
+        "artifact_name": "kra-backfill-2023",
+        "created_at": "2026-08-22T02:13:59Z",
+        "size_in_bytes": 60739592,
+        "digest": "sha256:7d811675a09642455ccf6c9f565fc186e4c1fed6c766f5f5dd875c0612a6a396"
+      },
+      {
+        "year": 2024,
+        "artifact_id": 9468426564,
+        "artifact_name": "kra-backfill-2024",
+        "created_at": "2026-08-22T02:15:07Z",
+        "size_in_bytes": 58574938,
+        "digest": "sha256:ea752f1edee84e8a7f3f3901fd81a8afda2f45c32175a354de42c6fda6bc6e5e"
+      },
+      {
+        "year": 2025,
+        "artifact_id": 9468442238,
+        "artifact_name": "kra-backfill-2025",
+        "created_at": "2026-08-22T02:16:22Z",
+        "size_in_bytes": 60915907,
+        "digest": "sha256:3dd23c3716c0989a2acfb1280291765c05010bfc90c6a98e8150af5389b1479e"
+      }
+    ]
+  },
+  "technical_audits": {
+    "2016": {
+      "audited_complete_units": 653,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 653,
+      "passed": true,
+      "state_counts": {
+        "complete": 653
+      },
+      "total_ledger_units": 653
+    },
+    "2017": {
+      "audited_complete_units": 648,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 648,
+      "passed": true,
+      "state_counts": {
+        "complete": 648
+      },
+      "total_ledger_units": 648
+    },
+    "2018": {
+      "audited_complete_units": 648,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 648,
+      "passed": true,
+      "state_counts": {
+        "complete": 648
+      },
+      "total_ledger_units": 648
+    },
+    "2019": {
+      "audited_complete_units": 648,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 648,
+      "passed": true,
+      "state_counts": {
+        "complete": 648
+      },
+      "total_ledger_units": 648
+    },
+    "2022": {
+      "audited_complete_units": 648,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 648,
+      "passed": true,
+      "state_counts": {
+        "complete": 648
+      },
+      "total_ledger_units": 648
+    },
+    "2023": {
+      "audited_complete_units": 657,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 657,
+      "passed": true,
+      "state_counts": {
+        "complete": 657
+      },
+      "total_ledger_units": 657
+    },
+    "2024": {
+      "audited_complete_units": 654,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 654,
+      "passed": true,
+      "state_counts": {
+        "complete": 654
+      },
+      "total_ledger_units": 654
+    },
+    "2025": {
+      "audited_complete_units": 654,
+      "endpoint_filter": null,
+      "errors": [],
+      "ledger_units": 654,
+      "passed": true,
+      "state_counts": {
+        "complete": 654
+      },
+      "total_ledger_units": 654
+    }
+  },
+  "packages": [
+    {
+      "name": "SHA256SUMS-2016-2025",
+      "size": 3936
+    },
+    {
+      "name": "kra-docs-2016-2025.tar.gz",
+      "size": 17366
+    },
+    {
+      "name": "kra-manifests-2016.tar.gz",
+      "size": 52233
+    },
+    {
+      "name": "kra-manifests-2017.tar.gz",
+      "size": 52726
+    },
+    {
+      "name": "kra-manifests-2018.tar.gz",
+      "size": 52765
+    },
+    {
+      "name": "kra-manifests-2019.tar.gz",
+      "size": 52418
+    },
+    {
+      "name": "kra-manifests-2022.tar.gz",
+      "size": 52588
+    },
+    {
+      "name": "kra-manifests-2023.tar.gz",
+      "size": 52999
+    },
+    {
+      "name": "kra-manifests-2024.tar.gz",
+      "size": 52872
+    },
+    {
+      "name": "kra-manifests-2025.tar.gz",
+      "size": 53175
+    },
+    {
+      "name": "kra-normalized-2016.tar.gz",
+      "size": 23731048
+    },
+    {
+      "name": "kra-normalized-2017.tar.gz",
+      "size": 29835079
+    },
+    {
+      "name": "kra-normalized-2018.tar.gz",
+      "size": 29773589
+    },
+    {
+      "name": "kra-normalized-2019.tar.gz",
+      "size": 30698254
+    },
+    {
+      "name": "kra-normalized-2022.tar.gz",
+      "size": 27133396
+    },
+    {
+      "name": "kra-normalized-2023.tar.gz",
+      "size": 27483807
+    },
+    {
+      "name": "kra-normalized-2024.tar.gz",
+      "size": 26503109
+    },
+    {
+      "name": "kra-normalized-2025.tar.gz",
+      "size": 27336415
+    },
+    {
+      "name": "kra-quarantine-2016.tar.gz",
+      "size": 246
+    },
+    {
+      "name": "kra-quarantine-2017.tar.gz",
+      "size": 248
+    },
+    {
+      "name": "kra-quarantine-2018.tar.gz",
+      "size": 246
+    },
+    {
+      "name": "kra-quarantine-2019.tar.gz",
+      "size": 244
+    },
+    {
+      "name": "kra-quarantine-2022.tar.gz",
+      "size": 348653
+    },
+    {
+      "name": "kra-quarantine-2023.tar.gz",
+      "size": 11177
+    },
+    {
+      "name": "kra-quarantine-2024.tar.gz",
+      "size": 6016
+    },
+    {
+      "name": "kra-quarantine-2025.tar.gz",
+      "size": 433531
+    },
+    {
+      "name": "kra-raw-2016.tar.gz",
+      "size": 24450210
+    },
+    {
+      "name": "kra-raw-2017.tar.gz",
+      "size": 30552874
+    },
+    {
+      "name": "kra-raw-2018.tar.gz",
+      "size": 30487536
+    },
+    {
+      "name": "kra-raw-2019.tar.gz",
+      "size": 31423600
+    },
+    {
+      "name": "kra-raw-2022.tar.gz",
+      "size": 27782949
+    },
+    {
+      "name": "kra-raw-2023.tar.gz",
+      "size": 28168475
+    },
+    {
+      "name": "kra-raw-2024.tar.gz",
+      "size": 27180698
+    },
+    {
+      "name": "kra-raw-2025.tar.gz",
+      "size": 28009565
+    },
+    {
+      "name": "source-artifacts-2016-2025.json",
+      "size": 2483
+    },
+    {
+      "name": "technical-audit-2016.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2017.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2018.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2019.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2022.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2023.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2024.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audit-2025.json",
+      "size": 156
+    },
+    {
+      "name": "technical-audits-2016-2025.json",
+      "size": 1803
+    }
+  ],
+  "dropbox_step_outcome": "failure",
+  "dropbox": {
+    "status": "missing_secrets",
+    "missing": [
+      "DROPBOX_APP_KEY",
+      "DROPBOX_APP_SECRET",
+      "DROPBOX_REFRESH_TOKEN"
+    ]
+  }
+}
