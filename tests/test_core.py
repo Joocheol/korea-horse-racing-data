@@ -153,6 +153,8 @@ class FormatAndPlanningTests(unittest.TestCase):
             "racedetailresult/getracedetailresult",
         )
         self.assertEqual(ENDPOINTS["results"].response_format, "xml")
+        self.assertEqual(ENDPOINTS["results"].num_rows, 3_000)
+        self.assertEqual(ENDPOINTS["triple"].num_rows, 100_000)
         self.assertEqual(ENDPOINTS["race_record"].service, "API4_3")
         self.assertEqual(ENDPOINTS["race_record"].response_format, "xml")
         self.assertTrue(all(
@@ -289,6 +291,14 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "duplicate"):
             validate_pages(pages)
 
+    def test_exact_duplicates_can_be_reported_for_endpoint_specific_cleanup(self) -> None:
+        row = {"meet": 1, "rcDate": 20200104, "rcNo": 1}
+        pages = [Page(1, 2, [row]), Page(2, 2, [row])]
+        summary = validate_pages(pages, allow_exact_duplicates=True)
+        self.assertEqual(summary.raw_rows, 2)
+        self.assertEqual(summary.unique_rows, 1)
+        self.assertEqual(summary.duplicate_rows, 1)
+
     def test_missing_rows_fail(self) -> None:
         with self.assertRaisesRegex(ValidationError, "mismatch"):
             validate_pages([Page(1, 2, [{"id": 1}])])
@@ -353,6 +363,66 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("checksum mismatch", report["errors"][0])
 
+    def test_audit_accepts_exact_duplicates_for_results_only(self) -> None:
+        class DuplicateResultsClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                raw = (
+                    b"<response><header><resultCode>00</resultCode>"
+                    b"<resultMsg>NORMAL SERVICE.</resultMsg></header><body>"
+                    b"<items><item><meet>2</meet><rcDate>20220122</rcDate>"
+                    b"<rcNo>1</rcNo></item></items><totalCount>2</totalCount>"
+                    b"</body></response>"
+                )
+                pages = [
+                    parse_response(raw, "xml", 1),
+                    parse_response(raw, "xml", 2),
+                ]
+                if on_page is not None:
+                    for page in pages:
+                        on_page(page)
+                return pages
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            unit = RequestUnit("results", 2, "202201", race_date="20220122")
+            self.assertEqual(
+                collect_units(DuplicateResultsClient(), [unit], output),
+                (1, 0),
+            )
+            report = audit_output(output)
+            self.assertTrue(report["passed"])
+            self.assertEqual(report["audited_complete_units"], 1)
+
+    def test_scoped_audit_ignores_failure_from_another_phase(self) -> None:
+        class FakeClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                page = json_page(1, 1, [{"id": unit.key}])
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            monthly = RequestUnit("single", 1, "202001")
+            failed_result = RequestUnit(
+                "results", 1, "202001", race_date="20200104"
+            )
+            collect_units(FakeClient(), [monthly], output)
+            Ledger(output / "ledger.json").update(
+                failed_result.key,
+                "failed",
+                request={"endpoint": "results"},
+                error="timed out",
+            )
+
+            full_report = audit_output(output)
+            scoped_report = audit_output(output, endpoints={"single"})
+            self.assertFalse(full_report["passed"])
+            self.assertTrue(scoped_report["passed"])
+            self.assertEqual(scoped_report["ledger_units"], 1)
+            self.assertEqual(scoped_report["total_ledger_units"], 2)
+            self.assertEqual(scoped_report["endpoint_filter"], ["single"])
+
     def test_partial_page_raw_bytes_are_preserved_after_failure(self) -> None:
         class FailingClient:
             def collect_unit(self, unit, num_rows=100_000, on_page=None):
@@ -370,6 +440,139 @@ class StorageAndResumeTests(unittest.TestCase):
             self.assertEqual(record["state"], "failed")
             self.assertEqual(record["partial_page_count"], 1)
             self.assertTrue((output / record["partial_raw_paths"][0]["path"]).is_file())
+
+    def test_transient_unit_failure_does_not_block_later_units_when_enabled(self) -> None:
+        class IntermittentClient:
+            def __init__(self):
+                self.num_rows: list[int] = []
+
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                self.num_rows.append(num_rows)
+                if unit.race_date == "20200104":
+                    raise TransientAPIError("timed out")
+                page = Page(
+                    page_no=1,
+                    total_count=0,
+                    rows=[],
+                    raw_body=b"<response />",
+                    response_format="xml",
+                )
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            client = IntermittentClient()
+            self.assertEqual(
+                collect_units(
+                    client,
+                    units,
+                    output,
+                    continue_on_transient_error=True,
+                ),
+                (1, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            self.assertEqual(ledger.state(units[0].key), "failed")
+            self.assertEqual(ledger.state(units[1].key), "complete")
+            self.assertEqual(client.num_rows, [3_000, 3_000])
+
+    def test_validation_failure_does_not_block_later_units_when_enabled(self) -> None:
+        class ValidationFailingClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                if unit.race_date == "20200104":
+                    raise ValidationError("duplicate rows")
+                page = Page(1, 0, [], b"<response />", "xml")
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            self.assertEqual(
+                collect_units(
+                    ValidationFailingClient(),
+                    units,
+                    output,
+                    continue_on_unit_error=True,
+                ),
+                (1, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            self.assertEqual(ledger.state(units[0].key), "failed")
+            self.assertEqual(ledger.state(units[1].key), "complete")
+
+    def test_raw_conflict_is_versioned_and_unit_completes(self) -> None:
+        class ChangedResponseClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                page = Page(1, 0, [], b"<new-response />", "xml")
+                if on_page is not None:
+                    on_page(page)
+                return [page]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            units = [
+                RequestUnit("results", 1, "202001", race_date="20200104"),
+                RequestUnit("results", 1, "202001", race_date="20200105"),
+            ]
+            conflict = output / "raw" / units[0].raw_page_relative_path(1)
+            conflict.parent.mkdir(parents=True, exist_ok=True)
+            conflict.write_bytes(b"<old-response />")
+
+            self.assertEqual(
+                collect_units(
+                    ChangedResponseClient(),
+                    units,
+                    output,
+                    continue_on_unit_error=True,
+                ),
+                (2, 0),
+            )
+            ledger = Ledger(output / "ledger.json")
+            completed = ledger.data["units"][units[0].key]
+            self.assertEqual(completed["state"], "complete")
+            self.assertEqual(conflict.read_bytes(), b"<old-response />")
+            revision = completed["raw_files"][0]
+            self.assertEqual(revision["conflict_with"], str(conflict.relative_to(output)))
+            self.assertEqual((output / revision["path"]).read_bytes(), b"<new-response />")
+            self.assertEqual(ledger.state(units[1].key), "complete")
+
+    def test_results_collection_deduplicates_only_staged_rows(self) -> None:
+        class DuplicateResultsClient:
+            def collect_unit(self, unit, num_rows=100_000, on_page=None):
+                row = {"meet": 1, "rcDate": 20200104, "rcNo": 1}
+                pages = [
+                    Page(1, 2, [row], b"<page>1</page>", "xml"),
+                    Page(2, 2, [row], b"<page>2</page>", "xml"),
+                ]
+                if on_page is not None:
+                    for page in pages:
+                        on_page(page)
+                return pages
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            unit = RequestUnit("results", 1, "202001", race_date="20200104")
+            self.assertEqual(
+                collect_units(DuplicateResultsClient(), [unit], output),
+                (1, 0),
+            )
+            record = Ledger(output / "ledger.json").data["units"][unit.key]
+            self.assertEqual(record["raw_rows"], 2)
+            self.assertEqual(record["unique_rows"], 1)
+            self.assertEqual(record["duplicate_rows"], 1)
+            staged = (output / record["staged_path"]).read_text().splitlines()
+            self.assertEqual(len(staged), 1)
 
 
 if __name__ == "__main__":
