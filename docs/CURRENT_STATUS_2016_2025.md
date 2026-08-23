@@ -85,18 +85,26 @@
 ### coverage 감사 — 해결 완료
 
 coverage gap 전수 감사 결과는 `docs/COVERAGE_GAP_AUDIT_2016_2025.md`에 정리했고,
-race-level source anomaly 161건은 `docs/coverage-anomalies-2016-2025.csv`에 보존한다.
+이미 확인한 예외와 최종 판정 순서는 `docs/KNOWN_DATA_EXCEPTIONS.md`에 정리한다.
 
 핵심 판정:
 
-- API179 sales source gap: **145경주**. 모든 경주에서 적어도 3개 이상의 odds 승식이 존재하므로 경주 미시행/전체 미판매가 아니라 source-level gap으로 분류.
-- 이 중 2020-02-23 서울 11경주 + 부경 6경주, 총 **17경주**는 PLC odds도 동반 미제공.
+- `sales_missing_all=True`인 **145경주**는 유효 순위가 없는 145경주와 정확히 일치한다. odds 격자가 남아 있어도 시행 경주로 판정하지 않는다.
+- 145경주 중 2020–2021은 50경주, 그 밖의 기간은 95경주이며 기본 분석에서 제외한다.
+- 2019-11-29 부경 11경주는 당일 전 경주 취소 사례다. 결과·HTML 링크가 없고 API 배당은 전부 `9999.9`다.
 - 2025-10-17 제주 8경주 + 부경 8경주, 총 **16경주**는 sales와 TLA/TRI odds는 있으나 WIN/PLC/QNL/EXA/QPL odds가 없다. 2025 source artifact에서도 해당 날짜 `single-all` 및 `double-*` normalized 행이 0임을 확인해 source endpoint gap으로 확정.
 - TRI의 2016-06-10 도입 전 **1,210경주** 공백은 구조적 pre-introduction gap.
 - 2020-06-19~2021-09-05 사이 **1,276경주**에서 EXA/QPL/TLA/TRI가 모두 없고 WIN/PLC/QNL만 존재하는 패턴은 당시 무고객 경마의 단승·연승·복승 제한 발매와 일치하는 구조적 COVID regime.
 
 따라서 현재 확인된 coverage gap 중 **재수집으로 해결해야 할 race-level collection failure는 발견되지 않았다.**
 source anomaly는 결측으로 유지하며 0으로 대체하지 않는다.
+
+### 배당 상한 예외 — 해결 완료
+
+- `odds == 9999.9`는 정상 유효 조합에서 표시상한으로 보존한다.
+- `odds > 9999.9`는 2018-07-01 하루, 15경주·18개 승식판·3,555행에서만 존재한다.
+- 초과값 범위는 10,000.3–235,070.0이며 실제 게시된 점값으로 보존한다.
+- 이후 bundle에서 다른 날짜의 초과값이 나오면 새 이상으로 경고한다.
 
 ## 4. canonical Dropbox
 
@@ -174,6 +182,7 @@ Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본
 
 `entries` 38행 초과 문제와 sales/odds coverage 이상치는 모두 원인을 분류하고 문서화했으므로 더 이상 남은 품질 점검 항목이 아니다. 과거 일회성 archive/rebuild workflow는 운영 단계에서 유지하지 않는다.
 
-남은 연구 단계 품질 점검은 다음 한 항목이다.
-
-1. 기존 HTML 기반 데이터와 새 API 데이터의 경주 universe 및 연구결과 비교
+후속 HTML 대조도 완료했다. HTML–API 공통 19,301경주에서 유효 배당
+24,263,109키의 숫자 불일치는 0건이다. 알려진 예외는
+`docs/KNOWN_DATA_EXCEPTIONS.md`에 고정하며, 입력 bundle이나 판정 규칙이 바뀌지 않는
+한 같은 사례를 다시 미해결 품질 문제로 열지 않는다.

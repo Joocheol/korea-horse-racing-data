@@ -62,7 +62,7 @@ ID를 키로 사용한다.
 월간 삼쌍승이 100,000행을 넘을 수 있어 `API30_1`의 TRI 단위에는 보수적으로
 2페이지를 예약한다.
 
-세부 검증 근거는 [API227_RACE_DAY_PLANNING.md](API227_RACE_DAY_PLANNING.md)를 본다.
+운영 순서는 [COLLECTION_WORKFLOW.md](COLLECTION_WORKFLOW.md)를 함께 본다.
 
 ## 3. Dropbox
 

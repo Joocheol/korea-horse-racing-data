@@ -100,9 +100,11 @@ from them.
 ### Field-size determination
 
 The number of runners $n$ enters every completeness check, so it must not be
-derived from the dividend grid it is used to check. We obtain $n$ from the
-entry-sheet endpoint (`dusu`) net of scratchings, independently of the
-dividend endpoints.
+derived from the dividend grid it is used to check. We obtain registered and
+starter counts from entry-sheet rows, result rows, and scratchings rather than
+using `dusu` as a standalone authority. The latter is missing in 40 races,
+invalid in one, and reports nine rather than ten runners for Jeju race 6 on
+18 May 2019.
 
 The APIs enumerate combinations over **starters**, not entries. On 8 March
 2025 at Seoul the quinella endpoint returned 520 cells for the day; the sum of
@@ -111,10 +113,13 @@ sum over entries is 550.
 
 ### Display cap
 
-Dividends are capped at 9999.9 in the source. This is a property of the KRA
-data itself and not of any one delivery channel: cells displayed as 9999.9 on
-the KRA web dividend boards return 9999.9 through the API as well. The cap is
-preserved in the dataset rather than imputed, and is flagged. Capped cells are
+Dividends are normally capped at 9999.9 in the source. This is a property of
+the KRA data itself and not of any one delivery channel: cells displayed as
+9999.9 on the KRA web dividend boards return 9999.9 through the API as well.
+Exact-cap cells are preserved rather than imputed and are flagged. The sole
+observed lifted-cap date is 1 July 2018: 3,555 cells in 15 races and 18 pool
+boards exceed 9999.9, with a maximum of 235,070.0. Those values are retained
+as point observations and are not flagged as capped. Exact-cap cells remain
 common in the deep pools — 477 of the 990 trifecta cells in one eleven-runner
 race examined here.
 
@@ -273,9 +278,10 @@ inferred from field size. `[TBD: distribution of observed cut-offs]`
 ## Usage Notes
 
 **The display cap is a censoring mechanism, not missingness.** A cell recorded
-as 9999.9 means the true dividend was at or above that value, which under
-pari-mutuel accounting bounds the ticket count from above. Users fitting
-models to the price vector should treat these cells as interval-censored.
+at exactly 9999.9 means the true dividend was at or above that value, which
+under pari-mutuel accounting bounds the ticket count from above. Users fitting
+models to the price vector should treat exact-cap cells as interval-censored,
+while treating the above-cap observations from 1 July 2018 as point values.
 `[TBD: share of cells at the cap, by pool]`
 
 **Combinations are enumerated over starters.** Scratched entries do not appear
