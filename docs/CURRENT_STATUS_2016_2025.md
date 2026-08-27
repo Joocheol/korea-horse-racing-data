@@ -132,6 +132,10 @@ source로 교체했다. 2019년은 분석용 출전두수를 이미 행 단위�
 
 canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사용한다.
 
+`kra-data`는 App Folder 방식의 Dropbox 앱 이름이다. 따라서 Dropbox API와
+GitHub Actions에서는 앱 루트를 이미 `/앱/kra-data/`로 간주하고 `/research/...`처럼
+앱 상대 경로를 사용한다. API 경로에 `/앱/kra-data`를 다시 붙이지 않는다.
+
 - `/앱/kra-data/raw/`
 - `/앱/kra-data/normalized/`
 - `/앱/kra-data/manifests/`
