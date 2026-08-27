@@ -1,0 +1,323 @@
+name: Publish API-only canonical dataset once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: kra-api-canonical-migration
+  cancel-in-progress: false
+
+jobs:
+  build-validate-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: kra-collection
+    env:
+      PYTHONPATH: src
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Test migration logic
+        run: python -m unittest discover -s tests -v
+
+      - name: Restore authoritative API-only base bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kra-research-2016-2025-corrected
+          path: restored/base
+          run-id: 32603481704
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Restore provider correction responses
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kra-provider-correction-audit
+          path: restored/provider
+          run-id: 33028591323
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Restore frozen HTML comparison evidence
+        run: >-
+          gzip -dc
+          docs/evidence/provider-correction-2026-08-27/html-backfill-odds.csv.gz
+          > html-backfill-odds.csv
+
+      - name: Build API-only canonical bundle
+        run: >-
+          python -m kra_data.canonical_update
+          --base restored/base
+          --provider-raw restored/provider/raw
+          --html-backfill html-backfill-odds.csv
+          --output research
+          --evidence canonical-api-migration-evidence.json
+
+      - name: Independently validate bundle
+        run: |
+          cd research
+          sha256sum -c SHA256SUMS
+          test "$(gzip -dc odds.jsonl.gz | wc -l)" -eq 29196005
+          test "$(gzip -dc coverage.jsonl.gz | wc -l)" -eq 24436
+          python <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8'))
+          assert manifest['schema_version'] == 2
+          assert manifest['tables']['odds_rows'] == 29_196_005
+          migration = manifest['provider_correction_migration']
+          assert migration['invalid_odds_rows_removed'] == 72
+          assert migration['provider_rows_added'] == 3_866
+          assert migration['html_rows_retained'] == 0
+          assert migration['comparison_exact_match'] is True
+          PY
+
+      - name: Preserve API-only canonical bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-canonical-api-only-2016-2025
+          path: research
+          retention-days: 90
+          compression-level: 0
+
+      - name: Preserve migration evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-canonical-api-migration-evidence
+          path: canonical-api-migration-evidence.json
+          retention-days: 90
+          compression-level: 6
+
+      - name: Stage, verify, and promote in canonical Dropbox
+        env:
+          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
+        run: |
+          python <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import time
+          import urllib.parse
+          import urllib.request
+
+          required = ('DROPBOX_APP_KEY', 'DROPBOX_APP_SECRET', 'DROPBOX_REFRESH_TOKEN')
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing Dropbox secrets: ' + ', '.join(missing))
+
+          credentials = base64.b64encode(
+              f"{os.environ['DROPBOX_APP_KEY']}:{os.environ['DROPBOX_APP_SECRET']}".encode()
+          ).decode()
+          token_request = urllib.request.Request(
+              'https://api.dropboxapi.com/oauth2/token',
+              data=urllib.parse.urlencode({
+                  'grant_type': 'refresh_token',
+                  'refresh_token': os.environ['DROPBOX_REFRESH_TOKEN'],
+              }).encode(),
+              headers={'Authorization': f'Basic {credentials}'},
+          )
+          with urllib.request.urlopen(token_request) as response:
+              token = json.load(response)['access_token']
+          auth = {'Authorization': f'Bearer {token}'}
+
+          def content_api(url, data, headers):
+              request = urllib.request.Request(url, data=data, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          def rpc(endpoint, payload):
+              request = urllib.request.Request(
+                  f'https://api.dropboxapi.com/2/files/{endpoint}',
+                  data=json.dumps(payload, ensure_ascii=True).encode(),
+                  headers={**auth, 'Content-Type': 'application/json'},
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          def move_wait(source, destination):
+              result = rpc('move_v2', {
+                  'from_path': source,
+                  'to_path': destination,
+                  'autorename': False,
+              })
+              if result.get('.tag') != 'async_job_id':
+                  return result
+              job_id = result['async_job_id']
+              for _ in range(120):
+                  status = rpc('async_job_status/get', {'async_job_id': job_id})
+                  tag = status.get('.tag')
+                  if tag == 'in_progress':
+                      time.sleep(1)
+                      continue
+                  if tag == 'complete':
+                      return status
+                  raise RuntimeError(f'Dropbox move failed: {status}')
+              raise TimeoutError(f'Dropbox move job did not complete: {job_id}')
+
+          def commit(path):
+              return {'path': path, 'mode': 'overwrite', 'autorename': False, 'mute': True}
+
+          def upload(source, destination):
+              size = source.stat().st_size
+              chunk_size = 8 * 1024 * 1024
+              if size <= 140 * 1024 * 1024:
+                  return content_api(
+                      'https://content.dropboxapi.com/2/files/upload',
+                      source.read_bytes(),
+                      {**auth, 'Content-Type': 'application/octet-stream',
+                       'Dropbox-API-Arg': json.dumps(commit(destination), ensure_ascii=True)},
+                  )
+              with source.open('rb') as handle:
+                  first = handle.read(chunk_size)
+                  started = content_api(
+                      'https://content.dropboxapi.com/2/files/upload_session/start',
+                      first,
+                      {**auth, 'Content-Type': 'application/octet-stream',
+                       'Dropbox-API-Arg': json.dumps({'close': False})},
+                  )
+                  session_id = started['session_id']
+                  offset = len(first)
+                  while offset < size:
+                      chunk = handle.read(chunk_size)
+                      finishing = offset + len(chunk) == size
+                      argument = {'cursor': {'session_id': session_id, 'offset': offset}}
+                      endpoint = 'finish' if finishing else 'append_v2'
+                      if finishing:
+                          argument['commit'] = commit(destination)
+                      else:
+                          argument['close'] = False
+                      result = content_api(
+                          f'https://content.dropboxapi.com/2/files/upload_session/{endpoint}',
+                          chunk,
+                          {**auth, 'Content-Type': 'application/octet-stream',
+                           'Dropbox-API-Arg': json.dumps(argument, ensure_ascii=True)},
+                      )
+                      offset += len(chunk)
+                  return result
+
+          def dropbox_content_hash(path):
+              block_digests = []
+              with path.open('rb') as handle:
+                  for block in iter(lambda: handle.read(4 * 1024 * 1024), b''):
+                      block_digests.append(hashlib.sha256(block).digest())
+              return hashlib.sha256(b''.join(block_digests)).hexdigest()
+
+          def list_files(path):
+              listing = rpc('list_folder', {'path': path, 'recursive': False})
+              result = {
+                  entry['name']: {
+                      'size': entry.get('size'),
+                      'content_hash': entry.get('content_hash'),
+                  }
+                  for entry in listing.get('entries', [])
+                  if entry.get('.tag') == 'file'
+              }
+              assert not listing.get('has_more'), 'unexpected Dropbox listing pagination'
+              return result
+
+          run_id = os.environ['GITHUB_RUN_ID_VALUE']
+          canonical = '/앱/kra-data/research/2016-2025'
+          staging = f'/앱/kra-data/research/.staging-2016-2025-{run_id}'
+          backup = f'/앱/kra-data/research/.backup-2016-2025-{run_id}'
+          local = pathlib.Path('research')
+          expected = {
+              path.name: {
+                  'size': path.stat().st_size,
+                  'content_hash': dropbox_content_hash(path),
+              }
+              for path in local.iterdir()
+              if path.is_file()
+          }
+          uploaded = []
+
+          rpc('create_folder_v2', {'path': staging, 'autorename': False})
+          for source in sorted(local.iterdir()):
+              if not source.is_file():
+                  continue
+              result = upload(source, f'{staging}/{source.name}')
+              uploaded.append({
+                  'name': source.name,
+                  'size': result.get('size'),
+                  'content_hash': result.get('content_hash'),
+                  'path': result.get('path_display'),
+              })
+              assert result.get('size') == expected[source.name]['size']
+              assert result.get('content_hash') == expected[source.name]['content_hash']
+              print(json.dumps(uploaded[-1], ensure_ascii=False))
+
+          staged_files = list_files(staging)
+          assert staged_files == expected, (staged_files, expected)
+
+          promotion = {
+              'canonical': canonical,
+              'staging': staging,
+              'backup': backup,
+              'old_moved': False,
+              'new_promoted': False,
+              'canonical_verified': False,
+              'rollback': None,
+              'backup_cleanup': None,
+          }
+          move_wait(canonical, backup)
+          promotion['old_moved'] = True
+          try:
+              move_wait(staging, canonical)
+              promotion['new_promoted'] = True
+              canonical_files = list_files(canonical)
+              assert canonical_files == expected, (canonical_files, expected)
+              promotion['canonical_verified'] = True
+          except Exception as promote_error:
+              try:
+                  move_wait(backup, canonical)
+                  promotion['rollback'] = 'success'
+              except Exception as rollback_error:
+                  promotion['rollback'] = f'failed: {rollback_error}'
+              raise RuntimeError(
+                  f'promotion/verification failed; rollback={promotion["rollback"]}'
+              ) from promote_error
+
+          try:
+              rpc('delete_v2', {'path': backup})
+              promotion['backup_cleanup'] = 'success'
+          except Exception as cleanup_error:
+              promotion['backup_cleanup'] = f'warning: {cleanup_error}'
+
+          evidence = {
+              'status': 'success',
+              'expected': expected,
+              'uploaded': uploaded,
+              'staged_verified': staged_files,
+              'canonical_verified': canonical_files,
+              'promotion': promotion,
+          }
+          pathlib.Path('dropbox-api-canonical-evidence.json').write_text(
+              json.dumps(evidence, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(promotion, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Preserve Dropbox publication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kra-api-canonical-dropbox-evidence
+          path: dropbox-api-canonical-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6

@@ -7,8 +7,9 @@
 - 2023-03-17 부경 API28_1 무효 자리표시자는 정정되지 않았다. 실제 경주 72행과
   존재하지 않는 9–12경주 128행, 총 200행이 현재 응답에도 남아 있다.
 
-canonical 데이터는 자동 덮어쓰지 않았다. 2025년 HTML backfill은 새 API 응답과
-key/value diff 0건을 확인한 뒤에만 API source로 교체한다.
+후속 전수 대조에서 2025년 HTML backfill과 새 API 응답의 key/value diff가 0건임을
+확인했다. 이 조건을 통과한 뒤 API-only canonical을 재빌드·검산하고 Dropbox에
+원자적으로 승격했다.
 
 ## 실행 증거
 
@@ -33,9 +34,10 @@ artifact는 11개 원문 JSON 응답, 요청별 SHA-256·행 수·완전성 판�
 
 각 응답은 1–8경주를 모두 포함한다. 합계 3,866행은 기존 HTML backfill의 제주
 1,562행·부경 2,304행과 정확히 일치한다. 이는 endpoint 공백의 복구를 확인하는
-강한 증거지만 숫자값 직접 동일성의 대체 증거는 아니다. 기존 authoritative API-only
-bundle에는 이 다섯 승식 행이 없고, KRA HTML 화면은 재검산 환경에서 502로 열리지
-않았으므로 이번 실행에서 3,866개 숫자값 diff는 수행하지 못했다.
+강한 증거이며, 이후 Dropbox에 보존돼 있던 `html_backfill_odds.csv`를 찾아 자연키와
+배당값을 직접 전수 대조했다. 공통 키 3,866개, 양쪽 고유 키 0개, 배당값 불일치
+0건이었다. HTML 파일 SHA-256은
+`4da85fae81b69d14e81373ecfecf78a69096b16a48db73bc306f8a978b0b0fd3`이다.
 
 ## 2019-05-18 제주 6경주
 
@@ -59,8 +61,12 @@ API26_2 재조회에서 6경주는 10행, 고유 `chulNo` 10개(1–10), `dusu` 
 
 ## 반영 결정
 
-1. 현재 HTML-backed canonical 29,196,005행은 유지한다.
-2. 2025년 3,866행은 key/value 직접 대조가 완료될 때까지 source 교체하지 않는다.
+1. HTML-backed canonical의 3,866행을 동일한 API source 행으로 교체했다.
+2. 기존 API-only bundle의 출전표 밖 72행을 제거해 canonical 무결성 규칙을 적용했다.
 3. 2019년 정정 상태를 문서화하되 계산 규칙은 바꾸지 않는다.
 4. 2023년 예외 범위를 72행에서 raw 총 200행으로 확장해 기록하고 필터를 유지한다.
-5. 재검산 도구는 원문을 자동 보존하지만 canonical을 자동 덮어쓰지 않는다.
+5. 최종 canonical은 29,196,005행이며 HTML source 행은 0이다.
+
+최종 이관·Dropbox 승격 증거는 Actions run `33032964636`의 artifact
+`9631057426`(migration), `9631069376`(Dropbox), `9631057131`(canonical bundle)에
+보존한다.

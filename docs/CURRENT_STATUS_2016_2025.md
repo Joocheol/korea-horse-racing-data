@@ -42,12 +42,13 @@
 | entries | **261,354** |
 | results | **261,354** |
 | sales | 163,844 |
-| odds | 29,192,211 |
+| odds | **29,196,005** |
 | non-race odds excluded | 526,192 |
 | coverage | 24,436 |
 
 산출 파일은 `races.jsonl.gz`, `entries.jsonl.gz`, `results.jsonl.gz`, `sales.jsonl.gz`, `odds.jsonl.gz`, `coverage.jsonl.gz`, `manifest.json`, `SHA256SUMS`이다.
-통합 빌더는 `src/kra_data/research.py`에 있다.
+통합 빌더는 `src/kra_data/research.py`에 있고, 검증된 공급기관 정정을 canonical에
+이관하는 fail-closed 빌더는 `src/kra_data/canonical_update.py`에 있다.
 
 검증 결과:
 
@@ -110,12 +111,11 @@ run `33028591323`, artifact `9629358212`에 보존했다.
 | 2019-05-18 제주 6경주 `dusu` | 10행, 출전번호 1–10, `dusu=10` | 정정 확인 |
 | 2023-03-17 부경 자리표시자 | 실제 1–8경주 출전표 밖 72행 + 비경주 9–12경주 128행 | 미정정 |
 
-2025년 복구 행 수는 기존 HTML backfill 3,866행과 정확히 일치한다. 다만 이번
-재검산은 KRA 공식 HTML 화면의 접속 실패로 숫자값 직접 비교를 완료하지 못했다.
-따라서 현재 canonical HTML backfill은 그대로 유지하고, API source로 이관할 때
-key/value diff 0건을 통과시킨 뒤에만 교체한다. 2019년은 분석용 출전두수를 이미
-행 단위로 재계산하므로 분석 결과 변경이 없다. 2023년 72행 제외와 비경주 universe
-제외 규칙도 계속 유지한다.
+Dropbox에 보존된 기존 HTML backfill 3,866행과 새 API 3,866행을 자연키
+`(race_id, pool_code, h1, h2, h3)`와 배당값으로 전수 대조했다. 공통 키 3,866개,
+양쪽 고유 키 0개, 배당값 불일치 0건이었다. 이에 따라 HTML backfill을 동일한 API
+source로 교체했다. 2019년은 분석용 출전두수를 이미 행 단위로 재계산하므로 분석
+결과 변경이 없다. 2023년 72행 제외와 비경주 universe 제외 규칙도 계속 유지한다.
 
 ### 배당 상한 예외 — 해결 완료
 
@@ -141,9 +141,11 @@ canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사
 
 credentials 자체는 GitHub Secrets에만 보관한다.
 
-## 5. corrected 최종 연구 bundle 보존 증거
+## 5. API-only 최종 연구 bundle 보존 증거
 
-최종 권위(authoritative) rebuild는 GitHub Actions run **`32603481704`**이며 `build-and-archive` job 전체가 `success`였다.
+최종 권위(authoritative) rebuild·publish는 GitHub Actions run **`33032964636`**이며
+`build-validate-publish` job 전체가 `success`였다. 이전 run `32603481704`의 API-only
+bundle은 이 run으로 대체됐다.
 
 run 내부 검증에서 다음을 직접 확인했다.
 
@@ -154,20 +156,29 @@ run 내부 검증에서 다음을 직접 확인했다.
 - entries conflicting duplicate keys: **38**
 - results: 261,354
 - sales: 163,844
-- odds: 29,192,211
+- base odds: 29,192,211
+- 출전표 밖 API odds 제거: 72
+- 2025-10-17 정정 API odds 추가: 3,866
+- 최종 API-only odds: **29,196,005**
+- HTML source rows: **0**
 - non-race odds excluded: 526,192
 - coverage: 24,436
+- 2025-10-17 coverage 갱신: 16경주
 - canonical entry key 261,354개 unique, 중복 0
 
 Actions 보존물:
 
-- corrected research artifact: `kra-research-2016-2025-corrected`, ID **`9483598242`**, 320,934,040 bytes
-- corrected Dropbox evidence artifact: `kra-research-dropbox-evidence-corrected`, ID **`9483606967`**, 622 bytes
+- final canonical artifact: `kra-canonical-api-only-2016-2025`, ID **`9631057131`**,
+  digest `sha256:19094bbba127d417e5c464561f46c76f7c98ef0422e940400f047710fd76df5f`
+- migration evidence: `kra-canonical-api-migration-evidence`, ID **`9631057426`**,
+  digest `sha256:7364b7a4b9cd31dd7d75ec0e46746941cbd9559891a08f50a9be010337c15f10`
+- Dropbox evidence: `kra-api-canonical-dropbox-evidence`, ID **`9631069376`**,
+  digest `sha256:1a4c4fc1b2b59f842db88abd86ade048df6c4e76deb24af28b9d0e1bd149711f`
 
 Dropbox publish는 파일별 직접 덮어쓰기가 아니라 다음 순서로 수행했다.
 
-1. `/앱/kra-data/research/.staging-2016-2025-32603481704/`에 전체 bundle 업로드
-2. staging의 8개 파일 이름·크기를 로컬 산출물과 대조
+1. `/앱/kra-data/research/.staging-2016-2025-33032964636/`에 전체 bundle 업로드
+2. staging의 8개 파일 이름·크기·Dropbox content hash를 로컬 산출물과 대조
 3. 기존 canonical 폴더를 backup으로 이동
 4. staging 폴더를 `/앱/kra-data/research/2016-2025/`로 승격
 5. 승격 성공 후 backup 삭제
@@ -176,29 +187,36 @@ Dropbox publish는 파일별 직접 덮어쓰기가 아니라 다음 순서로 �
 
 - `old_moved = true`
 - `new_promoted = true`
+- `canonical_verified = true`
 - `rollback = null`
 - `backup_cleanup = success`
 
-canonical Dropbox 메타데이터 재확인 결과 모든 파일의 `server_modified`는 `2026-08-22T22:56:47Z`이며 파일 크기는 다음과 같다.
+승격 후 canonical 폴더를 다시 조회해 8개 파일의 크기와 Dropbox content hash가
+staging 및 로컬 산출물과 동일함을 확인했다. 최종 파일 크기는 다음과 같다.
 
 | 파일 | bytes |
 | --- | ---: |
 | `SHA256SUMS` | 572 |
-| `coverage.jsonl.gz` | 125,355 |
+| `coverage.jsonl.gz` | 89,015 |
 | `entries.jsonl.gz` | **32,690,587** |
-| `manifest.json` | **685** |
-| `odds.jsonl.gz` | 261,361,771 |
+| `manifest.json` | **1,237** |
+| `odds.jsonl.gz` | **177,663,413** |
 | `races.jsonl.gz` | 492,943 |
 | `results.jsonl.gz` | 22,854,988 |
 | `sales.jsonl.gz` | 3,406,155 |
 
-Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본문 재다운로드가 아니라 **성공한 corrected rebuild의 내부 내용 검증 + Dropbox staging 크기 검증 + 원자적 승격 evidence + canonical 파일 메타데이터 재확인**을 결합해 판정한다.
+Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본문 재다운로드가
+아니라 **성공한 rebuild의 내부 내용 검증 + staging 크기·content-hash 검증 + 원자적
+승격 + 승격 후 canonical 크기·content-hash 재검증**을 결합해 판정한다.
 
 ## 6. 최종 판정과 남은 품질 점검
 
-**2016-2025 KRA 공개 API 수집·normalized 감사·coverage 감사·통합 연구 데이터 정리·corrected canonical Dropbox 보존은 완료 상태다.**
+**2016-2025 KRA 공개 API 수집·normalized 감사·coverage 감사·API-only canonical
+재빌드·Dropbox 보존은 완료 상태다.**
 
-`entries` 38행 초과 문제와 sales/odds coverage 이상치는 모두 원인을 분류하고 문서화했으므로 더 이상 남은 품질 점검 항목이 아니다. 과거 일회성 archive/rebuild workflow는 운영 단계에서 유지하지 않는다.
+`entries` 38행 초과 문제, 2023년 출전표 밖 72행, 2025년 endpoint 공백은 모두
+canonical에서 해결됐다. 2023년 공급기관 raw 응답 자체의 미정정 문제는 원자료
+예외로 남지만 현재 canonical 무결성에는 영향을 주지 않는다.
 
 후속 HTML 대조도 완료했다. HTML–API 공통 19,301경주에서 유효 배당
 24,263,109키의 숫자 불일치는 0건이다. 알려진 예외는
