@@ -117,8 +117,13 @@ class RecheckRunner:
         *,
         pool: str | None = None,
     ) -> Page:
-        unit = RequestUnit(endpoint, meet, race_date[:6], pool, race_date)
-        page = self.client.fetch_page(unit, 1, 100_000)
+        unit = RequestUnit(endpoint, meet, race_date[:6], pool)
+        page = self.client.fetch_page(
+            unit,
+            1,
+            100_000,
+            query_overrides={"rc_month": None, "rc_date": race_date, "rc_no": None},
+        )
         suffix = pool.lower() if pool else "all"
         filename = f"{race_date}-meet-{meet}-{endpoint}-{suffix}.json"
         path = self.raw_dir / filename
