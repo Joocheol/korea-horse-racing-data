@@ -1,0 +1,56 @@
+name: Create v1.0 release once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - .github/workflows/create-v1-release-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'Joocheol/korea-horse-racing-data'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Verify package version
+        run: |
+          python - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as f:
+              version = tomllib.load(f)["project"]["version"]
+          assert version == "1.0.0", version
+          PY
+
+      - name: Create v1.0 tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release v1.0 already exists; no action needed."
+            exit 0
+          fi
+          gh release create v1.0 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "v1.0 — 2016–2025 KRA dataset" \
+            --notes-file - <<'EOF'
+          First complete release of the 2016–2025 Korea Racing Authority OpenAPI research dataset.
+
+          - 10 years, Seoul/Jeju/Busan-Gyeongnam, 8 KRA OpenAPI services
+          - 24,436 races in the canonical race universe
+          - 261,354 entries and results
+          - 29,196,005 API-only odds rows
+          - 60 Dropbox files totaling 769,859,211 bytes
+          - Canonical Dropbox path: /앱/kra-data/research/2016-2025/
+          - Full collection, validation, exception, artifact, and checksum evidence is recorded in docs/CURRENT_STATUS_2016_2025.md
+
+          Known upstream exception: KRA's 2023-03-17 Busan-Gyeongnam raw response still contains 72 out-of-entry odds rows and 128 non-race rows. The canonical builder excludes them through validated fail-closed rules.
+          EOF
