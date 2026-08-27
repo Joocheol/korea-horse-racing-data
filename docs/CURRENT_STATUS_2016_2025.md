@@ -127,7 +127,8 @@ source로 교체했다. 2019년은 분석용 출전두수를 이미 행 단위�
 ## 4. canonical Dropbox
 
 이 프로젝트의 Dropbox 정본은 **GitHub Actions repository secrets**의
-`DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`이 가리키는 기존 Dropbox 앱 계정이다.
+`DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`이 가리키는
+App Folder 방식의 Dropbox 앱 **`kra-data`**이다.
 다른 Dropbox 연결이나 외부 커넥터 계정은 보존 완료 판정에 사용하지 않는다.
 
 canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사용한다.
@@ -147,9 +148,9 @@ credentials 자체는 GitHub Secrets에만 보관한다.
 
 ## 5. API-only 최종 연구 bundle 보존 증거
 
-최종 권위(authoritative) rebuild·publish는 GitHub Actions run **`33032964636`**이며
-`build-validate-publish` job 전체가 `success`였다. 이전 run `32603481704`의 API-only
-bundle은 이 run으로 대체됐다.
+최종 권위(authoritative) rebuild·publish는 GitHub Actions run **`33038721926`**이며
+`build-validate-publish` job 전체가 `success`였다. 이전 publish run `33032964636`과
+동일한 API-only bundle을 새 `kra-data` App Folder에 다시 게시해 보존 위치를 교체했다.
 
 run 내부 검증에서 다음을 직접 확인했다.
 
@@ -172,28 +173,28 @@ run 내부 검증에서 다음을 직접 확인했다.
 
 Actions 보존물:
 
-- final canonical artifact: `kra-canonical-api-only-2016-2025`, ID **`9631057131`**,
-  digest `sha256:19094bbba127d417e5c464561f46c76f7c98ef0422e940400f047710fd76df5f`
-- migration evidence: `kra-canonical-api-migration-evidence`, ID **`9631057426`**,
-  digest `sha256:7364b7a4b9cd31dd7d75ec0e46746941cbd9559891a08f50a9be010337c15f10`
-- Dropbox evidence: `kra-api-canonical-dropbox-evidence`, ID **`9631069376`**,
-  digest `sha256:1a4c4fc1b2b59f842db88abd86ade048df6c4e76deb24af28b9d0e1bd149711f`
+- final canonical artifact: `kra-canonical-api-only-2016-2025`, ID **`9633210289`**,
+  digest `sha256:d897cd5b36061c73d496659de352f45cdf126f8469b4c710e21fcb38971b1c53`
+- migration evidence: `kra-canonical-api-migration-evidence`, ID **`9633210657`**,
+  digest `sha256:1f83fe362020c39fd7c97367e71b5cb34bdd38076508f49e4349b10157003ad7`
+- Dropbox evidence: `kra-api-canonical-dropbox-evidence`, ID **`9633218660`**,
+  digest `sha256:4daf033568245e5024487d86ea42e73c8fd378f81b6700c053e7f7b4c2d47c3f`
 
 Dropbox publish는 파일별 직접 덮어쓰기가 아니라 다음 순서로 수행했다.
 
-1. `/앱/kra-data/research/.staging-2016-2025-33032964636/`에 전체 bundle 업로드
+1. `/앱/kra-data/research/.staging-2016-2025-33038721926-1/`에 전체 bundle 업로드
 2. staging의 8개 파일 이름·크기·Dropbox content hash를 로컬 산출물과 대조
-3. 기존 canonical 폴더를 backup으로 이동
+3. 기존 canonical 폴더가 있으면 backup으로 이동(새 앱 최초 게시에서는 생략)
 4. staging 폴더를 `/앱/kra-data/research/2016-2025/`로 승격
-5. 승격 성공 후 backup 삭제
+5. 승격 성공 후 backup이 있으면 삭제
 
 보존 evidence의 최종 상태는 다음과 같다.
 
-- `old_moved = true`
+- `old_moved = false`
 - `new_promoted = true`
 - `canonical_verified = true`
 - `rollback = null`
-- `backup_cleanup = success`
+- `backup_cleanup = not_required`
 
 승격 후 canonical 폴더를 다시 조회해 8개 파일의 크기와 Dropbox content hash가
 staging 및 로컬 산출물과 동일함을 확인했다. 최종 파일 크기는 다음과 같다.
