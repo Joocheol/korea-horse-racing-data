@@ -129,7 +129,9 @@ source로 교체했다. 2019년은 분석용 출전두수를 이미 행 단위�
 이 프로젝트의 Dropbox 정본은 **GitHub Actions repository secrets**의
 `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`이 가리키는
 App Folder 방식의 Dropbox 앱 **`kra-data`**이다.
-다른 Dropbox 연결이나 외부 커넥터 계정은 보존 완료 판정에 사용하지 않는다.
+GitHub Actions가 `research` canonical을 게시한다. 2026-08-27의 일회성 이전에서는
+Dropbox 연결을 사용해 기존 archival 계층을 새 앱으로 서버 측 복사한 뒤 원본과
+전수 대조했다.
 
 canonical 사용자 표시 경로는 `/앱/kra-data/`이며 다음 구조를 사용한다.
 
@@ -145,6 +147,24 @@ GitHub Actions에서는 앱 루트를 이미 `/앱/kra-data/`로 간주하고 `/
 - `/앱/kra-data/research/2016-2025/`
 
 credentials 자체는 GitHub Secrets에만 보관한다.
+
+최종 이전·정리 결과는 다음과 같다.
+
+| 계층 | 파일 수 | bytes |
+| --- | ---: | ---: |
+| `raw` | 9 | 268,956,483 |
+| `normalized` | 9 | 262,293,757 |
+| `manifests` | 23 | 568,407 |
+| `quarantine` | 9 | 800,141 |
+| `docs` | 2 | 41,513 |
+| `research` | 8 | 237,198,910 |
+| **전체** | **60** | **769,859,211** |
+
+기존 archival 5개 계층은 원본과 새 위치의 상대 경로·파일명·크기를 52개 파일
+전수 대조했고 불일치가 0건이었다. `manifests/SHA256SUMS-2016-2025`와
+`manifests/SHA256SUMS` 본문도 이전 전후 동일함을 확인했다. 검증 후 잘못 중첩된
+옛 `/앱/kra-actions-lab-joocheol/앱/kra-data/`와 빈 상위 `/앱` 폴더는 삭제했다.
+옛 앱의 `practice`와 `github-actions-tests`는 보존했다.
 
 ## 5. API-only 최종 연구 bundle 보존 증거
 
@@ -217,7 +237,7 @@ Dropbox 앱에는 content-read scope가 없으므로 사후 검증은 파일 본
 ## 6. 최종 판정과 남은 품질 점검
 
 **2016-2025 KRA 공개 API 수집·normalized 감사·coverage 감사·API-only canonical
-재빌드·Dropbox 보존은 완료 상태다.**
+재빌드·새 전용 Dropbox 앱으로의 이전·보존·옛 중복 경로 정리는 완료 상태다.**
 
 `entries` 38행 초과 문제, 2023년 출전표 밖 72행, 2025년 endpoint 공백은 모두
 canonical에서 해결됐다. 2023년 공급기관 raw 응답 자체의 미정정 문제는 원자료
