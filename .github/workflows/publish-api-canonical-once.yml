@@ -246,10 +246,14 @@ jobs:
 
           run_id = os.environ['GITHUB_RUN_ID_VALUE']
           run_attempt = os.environ['GITHUB_RUN_ATTEMPT_VALUE']
-          canonical = '/앱/kra-data/research/2016-2025'
-          staging = f'/앱/kra-data/research/.staging-2016-2025-{run_id}-{run_attempt}'
-          backup = f'/앱/kra-data/research/.backup-2016-2025-{run_id}-{run_attempt}'
-          failed = f'/앱/kra-data/research/.failed-2016-2025-{run_id}-{run_attempt}'
+          # This token is scoped to the Dropbox App Folder named ``kra-data``.
+          # API paths are relative to that app root; Dropbox displays the same
+          # locations under /앱/kra-data/ in the user interface.
+          research_root = '/research'
+          canonical = f'{research_root}/2016-2025'
+          staging = f'{research_root}/.staging-2016-2025-{run_id}-{run_attempt}'
+          backup = f'{research_root}/.backup-2016-2025-{run_id}-{run_attempt}'
+          failed = f'{research_root}/.failed-2016-2025-{run_id}-{run_attempt}'
           local = pathlib.Path('research')
           expected = {
               path.name: {
@@ -261,6 +265,8 @@ jobs:
           }
           uploaded = []
 
+          if not path_exists(research_root):
+              rpc('create_folder_v2', {'path': research_root, 'autorename': False})
           rpc('create_folder_v2', {'path': staging, 'autorename': False})
           for source in sorted(local.iterdir()):
               if not source.is_file():
@@ -291,8 +297,9 @@ jobs:
               'failed_canonical_quarantine': None,
               'backup_cleanup': None,
           }
-          move_wait(canonical, backup)
-          promotion['old_moved'] = True
+          if path_exists(canonical):
+              move_wait(canonical, backup)
+              promotion['old_moved'] = True
           try:
               move_wait(staging, canonical)
               promotion['new_promoted'] = True
@@ -304,19 +311,25 @@ jobs:
                   if path_exists(canonical):
                       move_wait(canonical, failed)
                       promotion['failed_canonical_quarantine'] = 'success'
-                  move_wait(backup, canonical)
-                  promotion['rollback'] = 'success'
+                  if promotion['old_moved']:
+                      move_wait(backup, canonical)
+                      promotion['rollback'] = 'success'
+                  else:
+                      promotion['rollback'] = 'not_required'
               except Exception as rollback_error:
                   promotion['rollback'] = f'failed: {rollback_error}'
               raise RuntimeError(
                   f'promotion/verification failed; rollback={promotion["rollback"]}'
               ) from promote_error
 
-          try:
-              rpc('delete_v2', {'path': backup})
-              promotion['backup_cleanup'] = 'success'
-          except Exception as cleanup_error:
-              promotion['backup_cleanup'] = f'warning: {cleanup_error}'
+          if promotion['old_moved']:
+              try:
+                  rpc('delete_v2', {'path': backup})
+                  promotion['backup_cleanup'] = 'success'
+              except Exception as cleanup_error:
+                  promotion['backup_cleanup'] = f'warning: {cleanup_error}'
+          else:
+              promotion['backup_cleanup'] = 'not_required'
 
           evidence = {
               'status': 'success',
