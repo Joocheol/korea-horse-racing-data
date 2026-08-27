@@ -1,13 +1,6 @@
 name: Publish API-only canonical dataset once
 
 on:
-  push:
-    branches: [agent/canonical-api-migration-20260827]
-    paths:
-      - .github/workflows/publish-api-canonical-once.yml
-      - src/kra_data/canonical_update.py
-      - tests/test_canonical_update.py
-      - docs/evidence/provider-correction-2026-08-27/html-backfill-odds.csv.gz
   workflow_dispatch:
 
 permissions:

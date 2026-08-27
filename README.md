@@ -12,7 +12,7 @@
 - 통합 연구용 race universe: 24,436경주
 - canonical entries/results: 각 **261,354행**
 - API26_2 source duplicate 38행은 raw/normalized에 보존하고 research에서 natural key 기준으로 정리
-- 통합 odds: 29,192,211행
+- API-only canonical odds: **29,196,005행**
 - `race_id` 중복: 0
 - corrected canonical Dropbox 연구 bundle 보존 완료
 - 원천 API가 제공하지 않는 값은 0으로 대체하지 않고 coverage gap으로 유지
@@ -31,11 +31,11 @@
 | --- | --- | --- |
 | 배당 `= 9999.9` | 정상 경주의 등록 마번 조합에서는 표시상한이다 | 삭제하지 않고 우측 검열값으로 보존 |
 | 배당 `> 9999.9` | **2018-07-01 하루만 존재**: 15경주, 18개 승식판, 3,555조합, 최대 235,070.0 | 상한값이 아니라 그날 실제 게시된 점값으로 보존 |
-| 2023-03-17 부경 8경주 | API28_1 단·연승에 출전표 밖 마번을 참조한 `9999.9` 72행 | 해당 72행만 제외; KRA 신고 완료 |
-| 2019-05-18 제주 6경주 | API26_2 `dusu=9`, 등록·실제 출전은 10두 | `dusu`를 단독 정본으로 사용하지 않음; KRA 신고 완료 |
+| 2023-03-17 부경 | 실제 1–8경주의 출전표 밖 72행과 비경주 9–12경주 128행이 현재 API에도 존재 | 72행은 출전표 무결성으로 제외, 128행은 race universe 밖으로 제외 |
+| 2019-05-18 제주 6경주 | 과거 API26_2 `dusu=9`; 2026-08-27 재조회에서 10으로 정정 | 행 단위 출전두수 계산 규칙 유지 |
 | 결과 없는 경주 | 전체 145경주. 2020–2021 50경주, 그 밖의 기간 95경주 | 원자료에는 보존하고 기본 분석에서 제외 |
 | 2019-11-29 부경 1–11경주 | 당일 11경주 전부 취소. 결과·HTML 링크가 없고 API 배당은 전부 `9999.9` | 배당 이상이 아니라 취소·무결과 경주로 처리 |
-| 2025-10-17 제주·부경 16경주 | API28_1·API29_1의 5개 승식이 빠졌지만 HTML에는 존재 | HTML 3,866행으로 보완하고 출처 표시 |
+| 2025-10-17 제주·부경 16경주 | 새 API 3,866행과 기존 HTML 3,866행의 자연키·배당값이 전부 일치 | HTML backfill을 폐기하고 API source로 이관 완료 |
 | HTML에 없고 API에 있는 경주 | 기존 HTML 수집은 지역별 전형 요일을 기준으로 한 부분집합 | HTML 부재만으로 API 경주를 이상으로 판정하지 않음 |
 
 판정 순서는 다음과 같다.
@@ -76,6 +76,7 @@ canonical Dropbox는 GitHub Actions repository secrets의
 - **[docs/SEMANTIC_AUDIT_2020_2021.md](docs/SEMANTIC_AUDIT_2020_2021.md)** — 2020·2021 의미 완전성 감사
 - **[docs/COVERAGE_GAP_AUDIT_2016_2025.md](docs/COVERAGE_GAP_AUDIT_2016_2025.md)** — coverage gap의 원인과 처리
 - **[docs/KNOWN_DATA_EXCEPTIONS.md](docs/KNOWN_DATA_EXCEPTIONS.md)** — 이미 확인한 이상·예외와 재조사 중단 기준
+- **[docs/CANONICAL_API_MIGRATION_2026-08-27.md](docs/CANONICAL_API_MIGRATION_2026-08-27.md)** — HTML backfill 전수 대조와 API-only canonical 이관 증거
 - `docs/backfill-audit-2016-2025.json`, `docs/pilot-audit-2020-2021.json` — 기계적 보존 감사 증거
 
 ## 개발·검증
@@ -87,4 +88,5 @@ PYTHONPATH=src python -m kra_data.preflight \
 PYTHONPATH=src python -m kra_data.normalized_audit <collection-artifact.zip>
 ```
 
-운영 workflow는 `collect.yml`, `probe.yml`, `ci.yml`만 유지합니다.
+운영 workflow는 `collect.yml`, `probe.yml`, `ci.yml`을 기본으로 유지하고,
+`publish-api-canonical-once.yml`은 증빙 재현을 위한 수동 실행 전용입니다.
