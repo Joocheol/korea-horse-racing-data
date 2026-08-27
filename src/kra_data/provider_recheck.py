@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -59,30 +59,38 @@ def analyze_2023_placeholders(
     entry_rows: Iterable[dict[str, Any]],
     single_rows: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
-    valid_chul_no: dict[int, set[int]] = defaultdict(set)
+    valid_chul_no: dict[int, set[int]] = {}
     for row in entry_rows:
-        valid_chul_no[_as_int(row["rcNo"])].add(_as_int(row["chulNo"]))
+        valid_chul_no.setdefault(_as_int(row["rcNo"]), set()).add(
+            _as_int(row["chulNo"])
+        )
 
-    invalid: list[dict[str, Any]] = []
+    out_of_entry_by_race: Counter[int] = Counter()
+    phantom_race_by_race: Counter[int] = Counter()
+    single_races: set[int] = set()
     for row in single_rows:
         race_no = _as_int(row["rcNo"])
         chul_no = _as_int(row["chulNo"])
-        if chul_no not in valid_chul_no[race_no]:
-            invalid.append(
-                {
-                    "rcNo": race_no,
-                    "chulNo": chul_no,
-                    "pool": row.get("pool"),
-                    "odds": row.get("odds"),
-                }
-            )
+        single_races.add(race_no)
+        if race_no not in valid_chul_no:
+            phantom_race_by_race[race_no] += 1
+        elif chul_no not in valid_chul_no[race_no]:
+            out_of_entry_by_race[race_no] += 1
+
+    out_of_entry_count = sum(out_of_entry_by_race.values())
+    phantom_race_count = sum(phantom_race_by_race.values())
+    invalid_count = out_of_entry_count + phantom_race_count
 
     return {
         "case": "2023-03-17 API28_1 out-of-entry placeholders",
         "entry_races": sorted(valid_chul_no),
-        "invalid_row_count": len(invalid),
-        "invalid_rows": invalid,
-        "resolved": len(invalid) == 0,
+        "single_response_races": sorted(single_races),
+        "out_of_entry_on_actual_race_count": out_of_entry_count,
+        "out_of_entry_by_race": dict(sorted(out_of_entry_by_race.items())),
+        "phantom_race_row_count": phantom_race_count,
+        "phantom_race_by_race": dict(sorted(phantom_race_by_race.items())),
+        "invalid_row_count": invalid_count,
+        "resolved": invalid_count == 0,
     }
 
 

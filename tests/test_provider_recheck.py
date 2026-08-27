@@ -32,7 +32,23 @@ class ProviderRecheckTests(unittest.TestCase):
         ]
         report = analyze_2023_placeholders(entries, single)
         self.assertEqual(report["invalid_row_count"], 1)
+        self.assertEqual(report["out_of_entry_on_actual_race_count"], 1)
+        self.assertEqual(report["out_of_entry_by_race"], {1: 1})
+        self.assertEqual(report["phantom_race_row_count"], 0)
         self.assertFalse(report["resolved"])
+
+    def test_2023_phantom_races_are_separate_from_out_of_entry_rows(self) -> None:
+        entries = [{"rcNo": 1, "chulNo": 1}]
+        single = [
+            {"rcNo": 1, "chulNo": 1, "pool": "단승식", "odds": 2.0},
+            {"rcNo": 9, "chulNo": 1, "pool": "단승식", "odds": 9999.9},
+        ]
+        report = analyze_2023_placeholders(entries, single)
+        self.assertEqual(report["entry_races"], [1])
+        self.assertEqual(report["single_response_races"], [1, 9])
+        self.assertEqual(report["out_of_entry_on_actual_race_count"], 0)
+        self.assertEqual(report["phantom_race_row_count"], 1)
+        self.assertEqual(report["phantom_race_by_race"], {9: 1})
 
     def test_2019_dusu_requires_ten_rows_and_value_ten(self) -> None:
         rows = [{"rcNo": 6, "chulNo": value, "dusu": 10} for value in range(1, 11)]

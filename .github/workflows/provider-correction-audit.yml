@@ -2,12 +2,6 @@ name: Audit KRA provider corrections
 
 on:
   workflow_dispatch:
-  push:
-    branches: [agent/provider-correction-audit-20260827]
-    paths:
-      - .github/workflows/provider-correction-audit.yml
-      - src/kra_data/provider_recheck.py
-      - tests/test_provider_recheck.py
 
 permissions:
   contents: read
