@@ -68,6 +68,8 @@ ID를 키로 사용한다.
 
 사용자에게 보이는 기준 경로는 **`/앱/kra-data/`**다. 기존
 `/앱/kra-actions-lab-joocheol/` 아래에 중첩하지 않는다.
+`kra-data` App Folder 토큰을 사용하는 코드 내부에서는 앱 루트가 이미
+`/앱/kra-data/`이므로 `/raw`, `/normalized`, `/research` 같은 상대 경로만 사용한다.
 
 ```text
 /앱/kra-data/
