@@ -104,6 +104,7 @@ jobs:
       - name: Stage, verify, and promote in canonical Dropbox
         env:
           GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT_VALUE: ${{ github.run_attempt }}
         run: |
           python <<'PY'
           import base64
@@ -113,6 +114,7 @@ jobs:
           import pathlib
           import time
           import urllib.parse
+          import urllib.error
           import urllib.request
 
           required = ('DROPBOX_APP_KEY', 'DROPBOX_APP_SECRET', 'DROPBOX_REFRESH_TOKEN')
@@ -148,6 +150,18 @@ jobs:
               )
               with urllib.request.urlopen(request) as response:
                   return json.load(response)
+
+          def path_exists(path):
+              try:
+                  rpc('get_metadata', {'path': path})
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode('utf-8', errors='replace')
+                  if error.code == 409 and 'not_found' in body:
+                      return False
+                  raise RuntimeError(
+                      f'Dropbox metadata check failed for {path}: HTTP {error.code}: {body}'
+                  ) from error
+              return True
 
           def move_wait(source, destination):
               result = rpc('move_v2', {
@@ -231,9 +245,11 @@ jobs:
               return result
 
           run_id = os.environ['GITHUB_RUN_ID_VALUE']
+          run_attempt = os.environ['GITHUB_RUN_ATTEMPT_VALUE']
           canonical = '/앱/kra-data/research/2016-2025'
-          staging = f'/앱/kra-data/research/.staging-2016-2025-{run_id}'
-          backup = f'/앱/kra-data/research/.backup-2016-2025-{run_id}'
+          staging = f'/앱/kra-data/research/.staging-2016-2025-{run_id}-{run_attempt}'
+          backup = f'/앱/kra-data/research/.backup-2016-2025-{run_id}-{run_attempt}'
+          failed = f'/앱/kra-data/research/.failed-2016-2025-{run_id}-{run_attempt}'
           local = pathlib.Path('research')
           expected = {
               path.name: {
@@ -267,10 +283,12 @@ jobs:
               'canonical': canonical,
               'staging': staging,
               'backup': backup,
+              'failed': failed,
               'old_moved': False,
               'new_promoted': False,
               'canonical_verified': False,
               'rollback': None,
+              'failed_canonical_quarantine': None,
               'backup_cleanup': None,
           }
           move_wait(canonical, backup)
@@ -283,6 +301,9 @@ jobs:
               promotion['canonical_verified'] = True
           except Exception as promote_error:
               try:
+                  if path_exists(canonical):
+                      move_wait(canonical, failed)
+                      promotion['failed_canonical_quarantine'] = 'success'
                   move_wait(backup, canonical)
                   promotion['rollback'] = 'success'
               except Exception as rollback_error:
